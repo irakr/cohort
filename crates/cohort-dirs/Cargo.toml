@@ -1,0 +1,9 @@
+[package]
+name = "cohort-dirs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Cohort's on-disk namespace: <OS config dir>/cohort with logs/ and config/"
+
+[dependencies]
+dirs = "6"

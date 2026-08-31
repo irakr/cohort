@@ -16,7 +16,9 @@ thiserror = { workspace = true }
 ts-rs = { workspace = true }
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 tracing = "0.1"
+tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+cohort-dirs = { path = "../cohort-dirs" }
 
 [dev-dependencies]
 http-body-util = "0.1"

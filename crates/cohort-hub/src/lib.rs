@@ -3,6 +3,7 @@ pub mod db;
 pub mod domain;
 pub mod error;
 pub mod llm;
+pub mod logging;
 pub mod routes;
 pub mod seed;
 

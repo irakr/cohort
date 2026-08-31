@@ -18,11 +18,17 @@ async function request<T>(method: "GET" | "POST", path: string, body?: unknown):
   if (body !== undefined) {
     headers["Content-Type"] = "application/json";
   }
-  const response = await fetch(`${getHubUrl()}${path}`, {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${getHubUrl()}${path}`, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  } catch (e) {
+    console.error(`hub unreachable: ${method} ${path}:`, e);
+    throw e;
+  }
   if (!response.ok) {
     let message = `${response.status}`;
     try {
@@ -33,6 +39,7 @@ async function request<T>(method: "GET" | "POST", path: string, body?: unknown):
     } catch {
       // non-JSON error body
     }
+    console.error(`hub ${method} ${path} failed (${response.status}): ${message}`);
     throw new ApiError(response.status, message);
   }
   return (await response.json()) as T;

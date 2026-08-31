@@ -73,6 +73,16 @@ Hub configuration (env):
 
 Data-centre deploy: `crates/cohort-hub/Dockerfile`.
 
+Both binaries share one on-disk namespace in the OS config directory
+(macOS `~/Library/Application Support/cohort`, Linux `~/.config/cohort`,
+Windows `%APPDATA%\cohort`), split into subdirectories:
+
+- `logs/app.log` - the desktop app (Rust side plus the forwarded webview
+  console), rotated at 2 MB
+- `logs/hub.log` - the hub (also mirrored to stdout); override the
+  directory with `COHORT_LOG_DIR` on servers
+- `config/cohort.db` - the hub's SQLite database when `COHORT_DB` is unset
+
 ## Tests and types
 
     make test       # hub + agent (cargo) and app (vitest)

@@ -24,5 +24,13 @@ test-app:
 
 test: test-hub test-app
 
+# The hub database lives in the cohort config namespace by default
+# (macOS/Linux paths below); the repo-local file covers COHORT_DB overrides.
 db-reset:
 	rm -f cohort.db cohort.db-shm cohort.db-wal
+	rm -f "$$HOME/Library/Application Support/cohort/config/cohort.db" \
+	      "$$HOME/Library/Application Support/cohort/config/cohort.db-shm" \
+	      "$$HOME/Library/Application Support/cohort/config/cohort.db-wal" \
+	      "$$HOME/.config/cohort/config/cohort.db" \
+	      "$$HOME/.config/cohort/config/cohort.db-shm" \
+	      "$$HOME/.config/cohort/config/cohort.db-wal"

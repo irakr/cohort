@@ -13,6 +13,7 @@ fn test_config() -> Config {
         bind: "127.0.0.1:0".into(),
         db: "sqlite::memory:".into(),
         allowed_origins: vec!["http://localhost:1420".into()],
+        log_dir: None,
         anthropic_api_key: None,
         anthropic_model: "claude-sonnet-5".into(),
     }
