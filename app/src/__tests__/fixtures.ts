@@ -57,11 +57,20 @@ export const ASSISTS: AssistSummary[] = [
 /** Install a fetch mock that answers hub endpoints from the fixtures,
     honoring the list filters the same way the hub does. */
 export function mockHubFetch() {
-  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input));
     let payload: unknown = { error: `no fixture for ${url.pathname}` };
-    if (url.pathname === "/api/users") {
+    if (url.pathname === "/api/users" && init?.method === "POST") {
+      const body = JSON.parse(String(init.body)) as { name: string };
+      payload = {
+        id: `u-${body.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")}`,
+        name: body.name.trim(),
+        initials: body.name.trim().charAt(0).toUpperCase(),
+      };
+    } else if (url.pathname === "/api/users") {
       payload = USERS;
+    } else if (url.pathname === "/api/notifications") {
+      payload = { now: new Date().toISOString(), notifications: [] };
     } else if (url.pathname === "/api/assists") {
       let rows = ASSISTS;
       const status = url.searchParams.get("status");

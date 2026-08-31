@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Bot, Check, ChevronLeft, FileText, SquareTerminal, X } from "lucide-react";
-import { suggestArtifacts } from "../../api/agent";
+import { AlertTriangle, Bot, Check, ChevronLeft, FileText, Folder, SquareTerminal, X } from "lucide-react";
+import { envFingerprint, suggestArtifacts } from "../../api/agent";
 import { apiPost } from "../../api/client";
 import type {
   ArtifactCandidate,
@@ -14,104 +14,146 @@ import { IconTile, Modal, SectionTitle, Spinner } from "../../components/ui";
 import { CATEGORY_LABELS } from "../../util";
 import { useNav } from "../../app/router";
 
-const TAG_CHOICES = ["kubernetes", "helm", "registry-auth", "postgres", "ci", "networking"];
-const GROUP_REVEAL_MS = [700, 1500, 2400];
-
-const ANALYZE_STEPS = [
-  "Fetching selected artifacts...",
-  "Analyzing errors across sources...",
-  "Creating the assist...",
-];
-
 function badgeColors(item: ArtifactCandidate): { bg: string; fg: string } {
   if (item.kind === "file") {
     return { bg: "var(--color-success-bg)", fg: "var(--color-success)" };
   }
-  if (item.kind === "custom") {
-    return { bg: "var(--color-neutral-200)", fg: "var(--color-neutral-700)" };
-  }
-  if (item.badge === "VS") {
-    return { bg: "var(--color-info)", fg: "#fff" };
+  if (item.kind === "terminal") {
+    return { bg: "var(--color-neutral-900)", fg: "#fff" };
   }
   if (item.badge === "CC") {
     return { bg: "#d97757", fg: "#fff" };
   }
-  if (item.badge === ">_") {
-    return { bg: "#6b6763", fg: "#fff" };
+  if (item.kind === "ai_agent") {
+    return { bg: "var(--color-info)", fg: "#fff" };
   }
-  return { bg: "var(--color-neutral-900)", fg: "#fff" };
+  return { bg: "var(--color-neutral-200)", fg: "var(--color-neutral-700)" };
+}
+
+/** Real app icon when the scan found one; folder/file glyphs for paths;
+    otherwise the badge tile as placeholder. */
+function ArtifactIcon({ item, size = 30 }: { item: ArtifactCandidate; size?: number }) {
+  if (item.icon) {
+    return (
+      <img
+        src={item.icon}
+        alt=""
+        width={size}
+        height={size}
+        style={{ borderRadius: 8, flexShrink: 0, objectFit: "contain" }}
+      />
+    );
+  }
+  if (item.kind === "file") {
+    const isDirectory = !item.label.includes(".");
+    const Glyph = isDirectory ? Folder : FileText;
+    return (
+      <IconTile size={size} bg="var(--color-success-bg)" fg="var(--color-success)">
+        <Glyph size={Math.round(size * 0.5)} />
+      </IconTile>
+    );
+  }
+  const colors = badgeColors(item);
+  return (
+    <IconTile size={size} fontSize={Math.round(size / 3)} bg={colors.bg} fg={colors.fg}>
+      {item.badge}
+    </IconTile>
+  );
+}
+
+function groupIcon(title: string) {
+  if (title === "Files") {
+    return <FileText size={13} />;
+  }
+  if (title === "AI agents") {
+    return <Bot size={13} />;
+  }
+  return <SquareTerminal size={13} />;
 }
 
 export function NewAssist() {
   const { navigate } = useNav();
-  const [groups, setGroups] = useState<ArtifactGroup[]>([]);
-  const [revealed, setRevealed] = useState(0);
+  // null = the agent module is still answering.
+  const [suggested, setSuggested] = useState<ArtifactGroup[] | null>(null);
   const [customItems, setCustomItems] = useState<ArtifactCandidate[]>([]);
   const [picked, setPicked] = useState<Record<string, boolean>>({});
   const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
   const [category, setCategory] = useState<Category | "">("");
-  const [tags, setTags] = useState<Record<string, boolean>>({});
+  const [tags, setTags] = useState<string[]>([]);
+  const [tagDraft, setTagDraft] = useState("");
   const [anonymous, setAnonymous] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [phase, setPhase] = useState<"select" | "analyzing">("select");
-  const [stepIndex, setStepIndex] = useState(0);
+  const [analyzeStep, setAnalyzeStep] = useState("");
   const [createError, setCreateError] = useState<string | null>(null);
 
+  const [scanNonce, setScanNonce] = useState(0);
   useEffect(() => {
     let cancelled = false;
-    void suggestArtifacts().then((g) => {
+    setSuggested(null);
+    void suggestArtifacts().then((groups) => {
       if (!cancelled) {
-        setGroups(g);
+        setSuggested(groups);
       }
     });
-    const timers = GROUP_REVEAL_MS.map((ms, i) =>
-      setTimeout(() => setRevealed((r) => Math.max(r, i + 1)), ms),
-    );
     return () => {
       cancelled = true;
-      timers.forEach(clearTimeout);
     };
-  }, []);
+  }, [scanNonce]);
 
   const allItems = useMemo(
-    () => [...groups.flatMap((g) => g.items), ...customItems],
-    [groups, customItems],
+    () => [...(suggested ?? []).flatMap((g) => g.items), ...customItems],
+    [suggested, customItems],
   );
   const selected = allItems.filter((it) => picked[it.id]);
   const canCreate = title.trim().length > 0;
 
+  function addTag(raw: string) {
+    const tag = raw.trim().toLowerCase().replace(/\s+/g, "-");
+    if (tag && !tags.includes(tag)) {
+      setTags((t) => [...t, tag]);
+    }
+    setTagDraft("");
+  }
+
   async function create() {
     setCreateError(null);
     setPhase("analyzing");
-    setStepIndex(0);
-    const stepTimers = [
-      setTimeout(() => setStepIndex(1), 1100),
-      setTimeout(() => setStepIndex(2), 2200),
-    ];
     const artifacts: AssistArtifact[] = selected.map((it) => ({
       id: it.id,
       kind: it.kind,
       label: it.label,
       detail: it.detail,
+      icon: it.icon,
+      pid: it.pid,
     }));
     try {
+      setAnalyzeStep("Drafting insights from the selected artifacts...");
       const draft = await apiPost<BriefDraft>("/api/assists/draft-brief", {
         title: title.trim(),
+        description: description.trim(),
         artifacts,
       });
+      // Merge the machine's real fingerprint into the environment chips.
+      const fingerprint = await envFingerprint();
+      const environment = [
+        ...draft.environment,
+        ...fingerprint.filter((f) => !draft.environment.includes(f)),
+      ];
+      setAnalyzeStep("Creating the assist...");
       const detail = await apiPost<AssistDetail>("/api/assists", {
         title: title.trim(),
-        tags: Object.keys(tags).filter((t) => tags[t]),
+        tags,
         category: category || null,
         anonymous,
-        goal: draft.goal,
-        failures: draft.failures,
-        environment: draft.environment,
+        description: description.trim(),
+        insights: draft.insights,
+        environment,
         artifacts,
       });
       navigate({ name: "assist", ref: detail.ref });
     } catch (e) {
-      stepTimers.forEach(clearTimeout);
       setPhase("select");
       setCreateError(e instanceof Error ? e.message : String(e));
     }
@@ -123,70 +165,95 @@ export function NewAssist() {
         <div className="card fade-in" style={{ width: 520, padding: 36, textAlign: "center" }}>
           <Spinner size={26} />
           <h2 style={{ fontSize: 19, margin: "14px 0 6px" }}>
-            Analyzing {selected.length} artifact{selected.length === 1 ? "" : "s"}
+            {selected.length > 0
+              ? `Analyzing ${selected.length} artifact${selected.length === 1 ? "" : "s"}`
+              : "Creating the assist"}
           </h2>
-          <p style={{ color: "var(--color-neutral-600)", fontSize: 13.5, margin: 0 }}>
-            {ANALYZE_STEPS[stepIndex]}
-          </p>
+          <p style={{ color: "var(--color-neutral-600)", fontSize: 13.5, margin: 0 }}>{analyzeStep}</p>
           <p style={{ color: "var(--color-neutral-500)", fontSize: 12, marginTop: 14 }}>
-            Analyzed locally and on your hub to draft the overview. Never shared with responders.
+            Analyzed to draft the overview. Never shared with responders as-is.
           </p>
         </div>
       </div>
     );
   }
 
-  const visibleGroups: (ArtifactGroup & { loading: boolean })[] = [
-    ...groups.map((g, i) => ({ ...g, loading: i >= revealed })),
-    ...(customItems.length > 0 ? [{ title: "Custom", items: customItems, loading: false }] : []),
+  const groups: ArtifactGroup[] = [
+    ...(suggested ?? []),
+    ...(customItems.length > 0 ? [{ title: "Added by you", items: customItems }] : []),
   ];
+  const nothingToShow = suggested !== null && groups.every((g) => g.items.length === 0);
 
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: "34px 28px" }}>
-      <h1 style={{ fontSize: 26, fontWeight: 700, marginBottom: 4 }}>New assist</h1>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 4 }}>
+        <h1 style={{ fontSize: 26, fontWeight: 700 }}>New assist</h1>
+        <div style={{ flex: 1 }} />
+        <button
+          className="btn"
+          style={{ padding: 7 }}
+          title="Cancel and go back to assists"
+          aria-label="Cancel"
+          onClick={() => navigate({ name: "assists" })}
+        >
+          <X size={15} />
+        </button>
+      </div>
       <p style={{ color: "var(--color-neutral-600)", fontSize: 13.5, margin: "0 0 22px" }}>
-        Suggested from what your agent module already sees. Everything is read-only and
-        starts unselected: nothing is shared until you toggle it on.
+        Suggested from what your agent module can see on this machine. Everything is
+        read-only and starts unselected: nothing is shared until you toggle it on.
       </p>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 350px", gap: 22, alignItems: "start" }}>
         <div>
-          <div style={{ display: "flex", alignItems: "center", marginBottom: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
             <SectionTitle>Suggested artifacts</SectionTitle>
             <div style={{ flex: 1 }} />
+            <button
+              className="btn"
+              title="Scan this machine again"
+              disabled={suggested === null}
+              onClick={() => setScanNonce((n) => n + 1)}
+            >
+              Rescan
+            </button>
             <button className="btn btn-dark" onClick={() => setAddOpen(true)}>
               Add artifacts
             </button>
           </div>
 
-          {visibleGroups.map((group) => (
-            <div key={group.title} style={{ marginBottom: 18 }}>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 7,
-                  fontSize: 12.5,
-                  fontWeight: 700,
-                  color: "var(--color-neutral-700)",
-                  marginBottom: 8,
-                }}
-              >
-                {group.title === "Files" ? (
-                  <FileText size={13} />
-                ) : group.title === "AI agents" ? (
-                  <Bot size={13} />
-                ) : (
-                  <SquareTerminal size={13} />
-                )}
-                {group.title}
-                {group.loading && (
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 5, color: "var(--color-neutral-500)", fontWeight: 400 }}>
-                    <Spinner size={12} /> fetching...
-                  </span>
-                )}
-              </div>
-              {!group.loading && (
+          {suggested === null && (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--color-neutral-600)" }}>
+              <Spinner size={14} /> Scanning this machine...
+            </span>
+          )}
+
+          {nothingToShow && customItems.length === 0 && (
+            <div className="card" style={{ padding: 20, fontSize: 13.5, color: "var(--color-neutral-600)" }}>
+              Nothing detected right now: no interactive terminal sessions and no
+              running or installed AI agents. Open a terminal in your project or
+              start your agent and hit Rescan, or add artifacts manually.
+            </div>
+          )}
+
+          {groups
+            .filter((g) => g.items.length > 0)
+            .map((group) => (
+              <div key={group.title} style={{ marginBottom: 18 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 7,
+                    fontSize: 12.5,
+                    fontWeight: 700,
+                    color: "var(--color-neutral-700)",
+                    marginBottom: 8,
+                  }}
+                >
+                  {groupIcon(group.title)}
+                  {group.title}
+                </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {group.items.map((item) => (
                     <ArtifactCard
@@ -197,9 +264,8 @@ export function NewAssist() {
                     />
                   ))}
                 </div>
-              )}
-            </div>
-          ))}
+              </div>
+            ))}
         </div>
 
         <div style={{ position: "sticky", top: 24, display: "flex", flexDirection: "column", gap: 14 }}>
@@ -223,8 +289,8 @@ export function NewAssist() {
             </div>
             <p style={{ fontSize: 12, color: "var(--color-neutral-600)", margin: 0 }}>
               {selected.length > 0
-                ? "Analyzed to draft the overview. Never shared with responders."
-                : "Pick artifacts for Cohort to analyze."}
+                ? "Analyzed to draft the overview. Never shared with responders as-is."
+                : "Pick artifacts for Cohort to analyze. Optional."}
             </p>
           </div>
 
@@ -235,7 +301,18 @@ export function NewAssist() {
                 className="input"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder="Rollout stuck on image pull"
+                placeholder="One line on what is stuck"
+              />
+            </div>
+
+            <div className="field">
+              <label>What's happening: the error, what you tried</label>
+              <textarea
+                className="input"
+                style={{ minHeight: 76, fontSize: 13.5 }}
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Describe the problem in your own words. Markdown works."
               />
             </div>
 
@@ -256,19 +333,36 @@ export function NewAssist() {
             </div>
 
             <div className="field">
-              <label>Tags</label>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {TAG_CHOICES.map((t) => (
-                  <button
-                    key={t}
-                    className={`btn${tags[t] ? " btn-on" : ""}`}
-                    style={{ padding: "5px 10px", fontSize: 12 }}
-                    onClick={() => setTags((prev) => ({ ...prev, [t]: !prev[t] }))}
-                  >
-                    {t}
-                  </button>
-                ))}
-              </div>
+              <label>Tags: stack and error specifics</label>
+              <input
+                className="input"
+                value={tagDraft}
+                onChange={(e) => setTagDraft(e.target.value)}
+                placeholder="type a tag, press Enter"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === ",") {
+                    e.preventDefault();
+                    addTag(tagDraft);
+                  }
+                }}
+                onBlur={() => addTag(tagDraft)}
+              />
+              {tags.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {tags.map((t) => (
+                    <button
+                      key={t}
+                      className="tag tag-neutral"
+                      style={{ border: "none", cursor: "pointer" }}
+                      title="Remove tag"
+                      onClick={() => setTags((list) => list.filter((x) => x !== t))}
+                    >
+                      {t}
+                      <X size={11} />
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             <label
@@ -314,6 +408,7 @@ export function NewAssist() {
 
       {addOpen && (
         <AddArtifactsModal
+          existingIds={allItems.map((it) => it.id)}
           onClose={() => setAddOpen(false)}
           onAdd={(item) => {
             setCustomItems((items) => [...items, item]);
@@ -335,7 +430,6 @@ function ArtifactCard({
   checked: boolean;
   toggle: () => void;
 }) {
-  const colors = badgeColors(item);
   return (
     <label
       style={{
@@ -350,9 +444,7 @@ function ArtifactCard({
       }}
     >
       <input type="checkbox" checked={checked} onChange={toggle} style={{ display: "none" }} />
-      <IconTile bg={colors.bg} fg={colors.fg}>
-        {item.badge}
-      </IconTile>
+      <ArtifactIcon item={item} />
       <span style={{ minWidth: 0, flex: 1 }}>
         <span style={{ display: "block", fontSize: 13.5, fontWeight: 600 }}>{item.label}</span>
         <span style={{ display: "block", fontSize: 12, color: "var(--color-neutral-600)" }}>
@@ -384,47 +476,85 @@ function ArtifactCard({
   );
 }
 
-const SUGGESTED_PATHS = ["k8s/secrets/regcred.yaml", ".github/workflows/deploy.yml"];
+type AddKind = "file" | "terminal" | "ai_agent";
+
+const ADD_META: Record<AddKind, { title: string; placeholder: string; icon: typeof FileText }> = {
+  file: { title: "Add a file or directory", placeholder: "path/to/file or directory/", icon: FileText },
+  terminal: { title: "Add a terminal", placeholder: "terminal name, e.g. iTerm2", icon: SquareTerminal },
+  ai_agent: { title: "Add an AI agent", placeholder: "agent name, e.g. Claude Code", icon: Bot },
+};
+
+function badgeFor(kind: AddKind, value: string): string {
+  if (kind === "terminal") {
+    return ">_";
+  }
+  if (kind === "ai_agent") {
+    return "AI";
+  }
+  const lower = value.toLowerCase();
+  if (lower.endsWith(".yaml") || lower.endsWith(".yml")) {
+    return "YML";
+  }
+  if (lower.endsWith(".log")) {
+    return "LOG";
+  }
+  return "TXT";
+}
 
 function AddArtifactsModal({
+  existingIds,
   onClose,
   onAdd,
 }: {
+  existingIds: string[];
   onClose: () => void;
   onAdd: (item: ArtifactCandidate) => void;
 }) {
-  const [step, setStep] = useState<"pick" | "files" | "term" | "agents">("pick");
-  const [path, setPath] = useState("");
+  const [step, setStep] = useState<"pick" | AddKind>("pick");
+  const [value, setValue] = useState("");
   const [scanning, setScanning] = useState(false);
+  const [found, setFound] = useState<ArtifactCandidate[]>([]);
 
+  // Each step re-scans the machine so newly opened terminals, agent
+  // sessions, and their directories show up without leaving the modal.
   useEffect(() => {
-    if (step === "term" || step === "agents") {
-      setScanning(true);
-      const t = setTimeout(() => setScanning(false), 1200);
-      return () => clearTimeout(t);
+    if (step === "pick") {
+      return;
     }
-  }, [step]);
+    let cancelled = false;
+    setScanning(true);
+    setFound([]);
+    void suggestArtifacts().then((groups) => {
+      if (cancelled) {
+        return;
+      }
+      setFound(
+        groups
+          .flatMap((g) => g.items)
+          .filter((it) => it.kind === step && !existingIds.includes(it.id)),
+      );
+      setScanning(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [step, existingIds]);
 
-  const addFile = (p: string) => {
-    const trimmed = p.trim();
-    if (!trimmed) {
+  const add = () => {
+    const trimmed = value.trim();
+    if (trimmed === "" || step === "pick") {
       return;
     }
     onAdd({
       id: `custom-${Date.now()}`,
-      kind: "custom",
-      badge: "TXT",
-      label: trimmed.split("/").pop() ?? trimmed,
-      detail: trimmed,
+      kind: step,
+      badge: badgeFor(step, trimmed),
+      label: step === "file" ? trimmed.split("/").filter(Boolean).pop() ?? trimmed : trimmed,
+      detail: step === "file" ? trimmed : "added manually",
       warn: false,
+      icon: null,
+      pid: null,
     });
-  };
-
-  const titles: Record<string, string> = {
-    pick: "Add artifacts",
-    files: "Add a file or directory",
-    term: "Attach a terminal",
-    agents: "Attach an AI agent",
   };
 
   return (
@@ -434,73 +564,99 @@ function AddArtifactsModal({
           <button
             className="btn"
             style={{ padding: 6 }}
-            onClick={() => setStep("pick")}
+            onClick={() => {
+              setStep("pick");
+              setValue("");
+            }}
             title="Back"
           >
             <ChevronLeft size={15} />
           </button>
         )}
-        <h3 style={{ fontSize: 16 }}>{titles[step]}</h3>
+        <h3 style={{ fontSize: 16 }}>{step === "pick" ? "Add artifacts" : ADD_META[step].title}</h3>
       </div>
 
-      {step === "pick" && (
+      {step === "pick" ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <button className="btn" style={{ justifyContent: "flex-start" }} onClick={() => setStep("files")}>
-            <FileText size={14} /> Files and directories
-          </button>
-          <button className="btn" style={{ justifyContent: "flex-start" }} onClick={() => setStep("term")}>
-            <SquareTerminal size={14} /> Terminals
-          </button>
-          <button className="btn" style={{ justifyContent: "flex-start" }} onClick={() => setStep("agents")}>
-            <Bot size={14} /> AI agents
-          </button>
+          {(Object.keys(ADD_META) as AddKind[]).map((kind) => {
+            const Icon = ADD_META[kind].icon;
+            return (
+              <button
+                key={kind}
+                className="btn"
+                style={{ justifyContent: "flex-start" }}
+                onClick={() => setStep(kind)}
+              >
+                <Icon size={14} />
+                {ADD_META[kind].title}
+              </button>
+            );
+          })}
         </div>
-      )}
-
-      {step === "files" && (
+      ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <input
-            className="input mono"
-            value={path}
-            onChange={(e) => setPath(e.target.value)}
-            placeholder="path/to/file or directory/"
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                addFile(path);
-              }
-            }}
-          />
-          <div style={{ fontSize: 12, color: "var(--color-neutral-600)" }}>Suggested</div>
-          {SUGGESTED_PATHS.map((p) => (
-            <button
-              key={p}
-              className="btn mono"
-              style={{ justifyContent: "flex-start", fontSize: 12 }}
-              onClick={() => addFile(p)}
-            >
-              {p}
-            </button>
-          ))}
-          <button className="btn btn-primary" disabled={!path.trim()} onClick={() => addFile(path)}>
-            Add read-only
-          </button>
-        </div>
-      )}
-
-      {(step === "term" || step === "agents") && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-start" }}>
           {scanning ? (
             <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--color-neutral-600)" }}>
-              <Spinner size={14} />
-              {step === "term"
-                ? "Listing active terminal sessions on this machine..."
-                : "Listing agent sessions on this machine..."}
+              <Spinner size={14} /> Scanning this machine...
             </span>
+          ) : found.length > 0 ? (
+            <div className="field">
+              <label>Detected now</label>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {found.map((item) => (
+                  <button
+                    key={item.id}
+                    className="btn"
+                    style={{ justifyContent: "flex-start", gap: 10 }}
+                    onClick={() => onAdd(item)}
+                  >
+                    <ArtifactIcon item={item} size={24} />
+                    <span style={{ minWidth: 0, textAlign: "left" }}>
+                      <span style={{ display: "block", fontSize: 13 }}>{item.label}</span>
+                      <span
+                        style={{
+                          display: "block",
+                          fontSize: 11,
+                          fontWeight: 400,
+                          color: "var(--color-neutral-600)",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {item.detail}
+                      </span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
           ) : (
-            <p style={{ fontSize: 13, color: "var(--color-neutral-600)", margin: 0 }}>
-              Everything the agent module detected is already in the suggestions list.
+            <p style={{ fontSize: 12.5, color: "var(--color-neutral-600)", margin: 0 }}>
+              Nothing new detected for this type right now.
             </p>
           )}
+
+          <div className="field">
+            <label>Or add manually</label>
+            <input
+              className={step === "file" ? "input mono" : "input"}
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              placeholder={ADD_META[step].placeholder}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  add();
+                }
+              }}
+            />
+          </div>
+          <button className="btn btn-primary" disabled={!value.trim()} onClick={add}>
+            Add read-only
+          </button>
+          <p style={{ fontSize: 11.5, color: "var(--color-neutral-500)", margin: 0 }}>
+            Selected artifacts are analyzed to draft the brief; access stays read-only.
+          </p>
         </div>
       )}
     </Modal>

@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   Clock,
   FileText,
+  Folder,
   Lock,
   MessageCircle,
   Radio,
@@ -18,6 +19,7 @@ import {
 import { apiPost } from "../../api/client";
 import { useApi } from "../../api/hooks";
 import type {
+  AssistArtifact,
   AssistDetail as AssistDetailT,
   Grant,
   LiveData,
@@ -209,35 +211,43 @@ export function AssistDetail({ assistRef }: { assistRef: string }) {
   );
 }
 
+function SharedArtifactIcon({ artifact }: { artifact: AssistArtifact }) {
+  if (artifact.icon) {
+    return (
+      <img
+        src={artifact.icon}
+        alt=""
+        width={30}
+        height={30}
+        style={{ borderRadius: 8, flexShrink: 0, objectFit: "contain" }}
+      />
+    );
+  }
+  const Glyph =
+    artifact.kind === "terminal"
+      ? SquareTerminal
+      : artifact.kind === "ai_agent"
+        ? Bot
+        : artifact.label.includes(".")
+          ? FileText
+          : Folder;
+  return (
+    <IconTile size={30} bg="var(--color-neutral-200)" fg="var(--color-neutral-700)">
+      <Glyph size={15} />
+    </IconTile>
+  );
+}
+
 function Brief({ assist }: { assist: AssistDetailT }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20, marginBottom: 26 }}>
-      <section>
-        <SectionTitle>Goal</SectionTitle>
+      {assist.description.trim() !== "" && (
         <div
           style={{ fontSize: 14, lineHeight: 1.6 }}
-          dangerouslySetInnerHTML={{ __html: renderMarkdown(assist.goal) }}
+          dangerouslySetInnerHTML={{ __html: renderMarkdown(assist.description) }}
         />
-      </section>
-      {assist.failures.length > 0 && (
-        <section>
-          <SectionTitle>Failures</SectionTitle>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {assist.failures.map((f, i) => (
-              <div
-                key={i}
-                className="card"
-                style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px" }}
-              >
-                <span className="mono" style={{ fontSize: 12.5, flex: 1 }}>
-                  {f.label}
-                </span>
-                <span className="tag tag-neutral">{f.note}</span>
-              </div>
-            ))}
-          </div>
-        </section>
       )}
+
       {assist.environment.length > 0 && (
         <section>
           <SectionTitle>Environment</SectionTitle>
@@ -250,15 +260,59 @@ function Brief({ assist }: { assist: AssistDetailT }) {
           </div>
         </section>
       )}
+
+      <section>
+        <SectionTitle>Insights</SectionTitle>
+        {assist.insights.trim() !== "" ? (
+          <div
+            style={{ fontSize: 14, lineHeight: 1.6 }}
+            dangerouslySetInnerHTML={{ __html: renderMarkdown(assist.insights) }}
+          />
+        ) : (
+          <p
+            style={{ fontSize: 13, color: "var(--color-neutral-500)", margin: 0 }}
+            title="The Cohort AI integration will analyze the shared artifacts and summarize the intent here"
+          >
+            N/A
+          </p>
+        )}
+      </section>
+
       {assist.artifacts.length > 0 && (
         <section>
-          <SectionTitle>Shared at open</SectionTitle>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <SectionTitle>Shared Artifacts</SectionTitle>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {assist.artifacts.map((a) => (
-              <span key={a.id} className="tag tag-accent" title={a.detail}>
-                {a.kind === "terminal" ? <SquareTerminal size={11} /> : a.kind === "ai_agent" ? <Bot size={11} /> : <FileText size={11} />}
-                {a.label}
-              </span>
+              <div
+                key={a.id}
+                className="card"
+                style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px" }}
+              >
+                <SharedArtifactIcon artifact={a} />
+                <span style={{ minWidth: 0, flex: 1 }}>
+                  <span style={{ display: "block", fontSize: 13.5, fontWeight: 600 }}>
+                    {a.label}
+                  </span>
+                  <span
+                    className="mono"
+                    style={{
+                      display: "block",
+                      fontSize: 11.5,
+                      color: "var(--color-neutral-600)",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {a.detail}
+                  </span>
+                </span>
+                {a.pid !== null && (
+                  <span className="tag tag-neutral mono" style={{ fontSize: 11 }}>
+                    pid {a.pid}
+                  </span>
+                )}
+              </div>
             ))}
           </div>
         </section>

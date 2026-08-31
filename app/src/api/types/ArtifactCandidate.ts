@@ -2,7 +2,7 @@
 
 export type ArtifactCandidate = { 
 /**
- * Stable id within the suggestion set, e.g. "t1", "f2".
+ * Stable id within the suggestion set, e.g. "a-claude".
  */
 id: string, 
 /**
@@ -10,10 +10,20 @@ id: string,
  */
 kind: string, 
 /**
- * 2-3 char icon badge, e.g. "iT", "YML", "CC".
+ * 2-3 char icon badge, e.g. "CC", "YML".
  */
 badge: string, label: string, detail: string, 
 /**
- * Shows the amber caution marker in the picker (e.g. path may hold secrets).
+ * Shows the caution marker in the picker (e.g. path may hold secrets).
  */
-warn: boolean, };
+warn: boolean, 
+/**
+ * App icon as a `data:image/png;base64,...` URI; None means the UI
+ * shows a placeholder badge.
+ */
+icon: string | null, 
+/**
+ * Process id of the detected session/agent; None for paths and
+ * installed-only entries.
+ */
+pid: number | null, };

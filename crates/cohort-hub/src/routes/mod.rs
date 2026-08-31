@@ -1,6 +1,7 @@
 pub mod assists;
 pub mod draft_brief;
 pub mod my_record;
+pub mod notifications;
 pub mod scope_requests;
 pub mod users;
 
@@ -16,7 +17,8 @@ async fn health() -> Json<serde_json::Value> {
 pub fn api_router() -> Router<AppState> {
     Router::new()
         .route("/api/health", get(health))
-        .route("/api/users", get(users::list))
+        .route("/api/users", get(users::list).post(users::create))
+        .route("/api/notifications", get(notifications::list))
         .route("/api/assists", get(assists::list).post(assists::create))
         .route("/api/assists/draft-brief", post(draft_brief::draft))
         .route("/api/assists/{ref}", get(assists::detail))

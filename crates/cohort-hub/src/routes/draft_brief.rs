@@ -5,12 +5,15 @@ use crate::AppState;
 use axum::extract::State;
 use axum::Json;
 
-/// Draft the brief from the owner's selected artifacts. The artifacts are
-/// analyzed to draft the overview; they are never shown to responders as-is.
+/// Draft the insights from the owner's title, description, and selected
+/// artifacts. Empty draft without an API key - the UI shows N/A; nothing is
+/// ever invented.
 pub async fn draft(
     State(state): State<AppState>,
     Json(req): Json<DraftBriefRequest>,
 ) -> Result<Json<BriefDraft>, AppError> {
-    let draft = llm::draft_brief(&state.config, &state.http, &req.title, &req.artifacts).await;
+    let draft =
+        llm::draft_brief(&state.config, &state.http, &req.title, &req.description, &req.artifacts)
+            .await;
     Ok(Json(draft))
 }

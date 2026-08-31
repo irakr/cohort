@@ -4,30 +4,44 @@
 //! the context picker and fingerprints the environment. Data produced here
 //! stays local until the owner explicitly shares it.
 //!
-//! The base version is a deterministic stub behind [`AgentModule`]; real
-//! detection (terminal discovery, agent-session telemetry, git state) replaces
-//! [`StubAgent`] later without touching the UI or the hub.
+//! Detection is real and scoped to what the machine can cheaply reveal (see
+//! [`scan`]): interactive terminal sessions with their working directories,
+//! running or installed AI agents (with Claude Code session activity from its
+//! transcripts), and the directories those point at. The detector daemon (P1)
+//! deepens this with telemetry; the picker's manual "Add artifacts" covers
+//! anything the scan cannot see.
 
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 use ts_rs::TS;
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export)]
+pub mod icons;
+pub mod scan;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[cfg_attr(feature = "ts-export", ts(export))]
 pub struct ArtifactCandidate {
-    /// Stable id within the suggestion set, e.g. "t1", "f2".
+    /// Stable id within the suggestion set, e.g. "a-claude".
     pub id: String,
     /// Picker kind: "terminal" | "file" | "ai_agent" | "custom".
     pub kind: String,
-    /// 2-3 char icon badge, e.g. "iT", "YML", "CC".
+    /// 2-3 char icon badge, e.g. "CC", "YML".
     pub badge: String,
     pub label: String,
     pub detail: String,
-    /// Shows the amber caution marker in the picker (e.g. path may hold secrets).
+    /// Shows the caution marker in the picker (e.g. path may hold secrets).
     pub warn: bool,
+    /// App icon as a `data:image/png;base64,...` URI; None means the UI
+    /// shows a placeholder badge.
+    pub icon: Option<String>,
+    /// Process id of the detected session/agent; None for paths and
+    /// installed-only entries.
+    #[ts(type = "number | null")]
+    pub pid: Option<i32>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[cfg_attr(feature = "ts-export", ts(export))]
 pub struct ArtifactGroup {
     /// "Terminals" | "Files" | "AI agents"
     pub title: String,
@@ -41,55 +55,48 @@ pub trait AgentModule: Send + Sync {
     fn env_fingerprint(&self) -> Vec<String>;
 }
 
-/// Deterministic stub used by the base version.
-pub struct StubAgent;
+/// Detect installed AI agent CLIs by their well-known home directories.
+/// Only reports presence - it reads nothing from inside them.
+pub fn agent_installs(home: &Path) -> Vec<ArtifactCandidate> {
+    let known: [(&str, &str, &str, &str); 3] = [
+        (".claude", "a-claude", "CC", "Claude Code"),
+        (".cursor", "a-cursor", "Cu", "Cursor"),
+        (".aider", "a-aider", "Ai", "Aider"),
+    ];
+    known
+        .iter()
+        .filter(|(dir, _, _, _)| home.join(dir).is_dir())
+        .map(|(_, id, badge, label)| ArtifactCandidate {
+            id: (*id).into(),
+            kind: "ai_agent".into(),
+            badge: (*badge).into(),
+            label: (*label).into(),
+            detail: "installed - no active session".into(),
+            warn: false,
+            icon: None,
+            pid: None,
+        })
+        .collect()
+}
 
-impl AgentModule for StubAgent {
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(PathBuf::from)
+}
+
+/// The real local agent used by the base version: scans the process table,
+/// tty shells, and agent transcripts on every call. See [`scan`].
+pub struct LocalAgent;
+
+impl AgentModule for LocalAgent {
     fn suggest_artifacts(&self) -> Vec<ArtifactGroup> {
-        fn c(id: &str, kind: &str, badge: &str, label: &str, detail: &str, warn: bool) -> ArtifactCandidate {
-            ArtifactCandidate {
-                id: id.into(),
-                kind: kind.into(),
-                badge: badge.into(),
-                label: label.into(),
-                detail: detail.into(),
-                warn,
-            }
+        match home_dir() {
+            Some(home) => scan::scan(&home),
+            None => Vec::new(),
         }
-        vec![
-            ArtifactGroup {
-                title: "Terminals".into(),
-                items: vec![
-                    c("t1", "terminal", "iT", "iTerm2 (payments)", "last command: kubectl rollout status", false),
-                    c("t2", "terminal", "VS", "VS Code (zsh)", "integrated terminal, 2 tabs", false),
-                    c("t3", "terminal", ">_", "Terminal (ssh)", "ssh staging-02 - idle 18m", true),
-                ],
-            },
-            ArtifactGroup {
-                title: "Files".into(),
-                items: vec![
-                    c("f1", "file", "YML", "deployment.yaml", "k8s/payments - ref a3f9c1", false),
-                    c("f2", "file", "YML", "kustomization.yaml", "k8s/payments - ref a3f9c1", false),
-                    c("f3", "file", "YML", "values.yaml", "charts/payments - ref a3f9c1", true),
-                ],
-            },
-            ArtifactGroup {
-                title: "AI agents".into(),
-                items: vec![
-                    c("a1", "ai_agent", "CC", "Claude Code", "agent session active - 41 turns", false),
-                    c("a2", "ai_agent", "Cu", "Cursor", "agent session idle - 12 turns", false),
-                ],
-            },
-        ]
     }
 
     fn env_fingerprint(&self) -> Vec<String> {
-        vec![
-            "Kubernetes 1.29".into(),
-            "Helm 3.14".into(),
-            "registry.internal:5000".into(),
-            "Linux amd64".into(),
-        ]
+        vec![format!("{} {}", std::env::consts::OS, std::env::consts::ARCH)]
     }
 }
 
@@ -98,17 +105,41 @@ mod tests {
     use super::*;
 
     #[test]
-    fn suggestions_are_stable_and_non_empty() {
-        let a = StubAgent.suggest_artifacts();
-        let b = StubAgent.suggest_artifacts();
-        assert_eq!(a.len(), 3);
-        assert!(a.iter().all(|g| !g.items.is_empty()));
-        assert_eq!(serde_json::to_string(&a).is_ok(), true);
-        assert_eq!(format!("{a:?}"), format!("{b:?}"));
+    fn agent_installs_reports_only_present_dirs() {
+        let base = std::env::temp_dir().join(format!("cohort-agent-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join(".claude")).unwrap();
+
+        let found = agent_installs(&base);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].label, "Claude Code");
+        assert_eq!(found[0].kind, "ai_agent");
+
+        std::fs::create_dir_all(base.join(".cursor")).unwrap();
+        let found = agent_installs(&base);
+        assert_eq!(found.len(), 2);
+
+        std::fs::remove_dir_all(&base).unwrap();
+        assert!(agent_installs(&base).is_empty());
     }
 
     #[test]
-    fn fingerprint_non_empty() {
-        assert!(!StubAgent.env_fingerprint().is_empty());
+    fn live_scan_does_not_panic_and_serializes() {
+        // Runs against the real machine: content varies, shape must hold.
+        let groups = LocalAgent.suggest_artifacts();
+        assert!(serde_json::to_string(&groups).is_ok());
+        for group in &groups {
+            assert!(!group.items.is_empty());
+            for item in &group.items {
+                assert!(["terminal", "file", "ai_agent"].contains(&item.kind.as_str()));
+            }
+        }
+    }
+
+    #[test]
+    fn fingerprint_is_real_and_non_empty() {
+        let fp = LocalAgent.env_fingerprint();
+        assert_eq!(fp.len(), 1);
+        assert!(fp[0].contains(std::env::consts::OS));
     }
 }

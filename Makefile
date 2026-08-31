@@ -10,8 +10,10 @@ dev-app:
 	cd app && npx tauri dev
 
 # Regenerate TypeScript bindings from the Rust wire types (committed).
+# The ts-export feature gates ts-rs's generated export tests, so a plain
+# `cargo test` never writes TypeScript files.
 types:
-	TS_RS_EXPORT_DIR=../../app/src/api/types cargo test -p cohort-hub -p cohort-agent export_bindings
+	TS_RS_EXPORT_DIR=../../app/src/api/types cargo test -p cohort-hub -p cohort-agent --features cohort-hub/ts-export,cohort-agent/ts-export export_bindings
 	cd app/src/api/types && rm -f index.ts && (for f in *.ts; do echo "export type * from \"./$${f%.ts}\";"; done) > index.tmp && mv index.tmp index.ts
 
 test-hub:

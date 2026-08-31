@@ -5,8 +5,12 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+base64 = "0.22"
 serde = { workspace = true }
+serde_json = { workspace = true }
 ts-rs = { workspace = true }
 
-[dev-dependencies]
-serde_json = { workspace = true }
+[features]
+# Enables the ts-rs export tests used by `make types`. Off by default so a
+# plain `cargo test` never writes TypeScript files.
+ts-export = []

@@ -1,20 +1,27 @@
-// Seeded-user selection (real auth arrives with P2). The id rides on every
-// request as X-User-Id; the switcher in the rail footer changes it.
+// This machine's identity: chosen once on first launch (register or pick an
+// existing user on the hub), then persisted. Real auth arrives with P2.
 
 const KEY = "cohort.userId";
-const DEFAULT_ID = "u-alex";
 
-export function getCurrentUserId(): string {
+export function getCurrentUserId(): string | null {
   try {
-    return localStorage.getItem(KEY) || DEFAULT_ID;
+    return localStorage.getItem(KEY);
   } catch {
-    return DEFAULT_ID;
+    return null;
   }
 }
 
 export function setCurrentUserId(id: string): void {
   try {
     localStorage.setItem(KEY, id);
+  } catch {
+    // storage unavailable
+  }
+}
+
+export function clearCurrentUserId(): void {
+  try {
+    localStorage.removeItem(KEY);
   } catch {
     // storage unavailable
   }

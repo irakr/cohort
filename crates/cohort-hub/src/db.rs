@@ -22,8 +22,12 @@ pub async fn pool(db: &str) -> Result<SqlitePool, sqlx::Error> {
     Ok(pool)
 }
 
+// Millisecond precision: notification cursors compare timestamps with a
+// strict `>`, so same-second events must still order after the cursor. Keep
+// every generated timestamp in this one format - the comparisons are
+// lexicographic and only hold if the format is uniform.
 pub fn now_rfc3339() -> String {
-    Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
 fn parse_enum<T: serde::de::DeserializeOwned>(s: &str) -> Result<T, AppError> {
@@ -76,8 +80,8 @@ pub struct AssistRow {
     pub owner_id: String,
     pub owner_name: String,
     pub anonymous: bool,
-    pub goal: String,
-    pub failures: Vec<Failure>,
+    pub description: String,
+    pub insights: String,
     pub environment: Vec<String>,
     pub live_data: Option<LiveData>,
     pub created_at: String,
@@ -95,7 +99,6 @@ pub async fn assist_row(pool: &SqlitePool, ref_: &str) -> Result<AssistRow, AppE
     .ok_or(AppError::NotFound)?;
     let status: String = row.get("status");
     let category: Option<String> = row.get("category");
-    let failures: String = row.get("failures");
     let environment: String = row.get("environment");
     let live_data: Option<String> = row.get("live_data");
     Ok(AssistRow {
@@ -109,8 +112,8 @@ pub async fn assist_row(pool: &SqlitePool, ref_: &str) -> Result<AssistRow, AppE
         owner_id: row.get("owner_id"),
         owner_name: row.get("owner_name"),
         anonymous: row.get::<i64, _>("anonymous") != 0,
-        goal: row.get("goal"),
-        failures: serde_json::from_str(&failures).unwrap_or_default(),
+        description: row.get("description"),
+        insights: row.get("insights"),
         environment: serde_json::from_str(&environment).unwrap_or_default(),
         live_data: live_data.and_then(|s| serde_json::from_str(&s).ok()),
         created_at: row.get("created_at"),
@@ -154,7 +157,7 @@ pub async fn responders_for(pool: &SqlitePool, ref_: &str) -> Result<Vec<User>, 
 
 pub async fn artifacts_for(pool: &SqlitePool, ref_: &str) -> Result<Vec<AssistArtifact>, AppError> {
     let rows = sqlx::query(
-        "SELECT id, kind, label, detail FROM assist_artifacts WHERE assist_ref = ? ORDER BY id",
+        "SELECT id, kind, label, detail, icon, pid FROM assist_artifacts WHERE assist_ref = ? ORDER BY id",
     )
     .bind(ref_)
     .fetch_all(pool)
@@ -166,6 +169,8 @@ pub async fn artifacts_for(pool: &SqlitePool, ref_: &str) -> Result<Vec<AssistAr
             kind: r.get("kind"),
             label: r.get("label"),
             detail: r.get("detail"),
+            icon: r.get("icon"),
+            pid: r.get("pid"),
         })
         .collect())
 }
@@ -221,7 +226,7 @@ pub fn derive_grants(requests: &[ScopeRequest], assist_status: AssistStatus) -> 
                     if exp <= now {
                         return None; // expired
                     }
-                    Some(exp.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+                    Some(exp.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
                 }
                 _ => None, // no TTL = until close
             };
@@ -259,8 +264,8 @@ pub async fn assist_detail(
         tags,
         owner_id: row.owner_id,
         anonymous: row.anonymous,
-        goal: row.goal,
-        failures: row.failures,
+        description: row.description,
+        insights: row.insights,
         environment: row.environment,
         artifacts,
         responders,

@@ -1,6 +1,9 @@
 target/
 node_modules/
 dist/
+# ts-rs default export dir, written by plain `cargo test`; the committed
+# bindings live in app/src/api/types (via `make types`)
+crates/*/bindings/
 *.db
 *.db-shm
 *.db-wal

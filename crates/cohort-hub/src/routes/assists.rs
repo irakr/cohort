@@ -79,7 +79,7 @@ pub async fn create(
     }
     let ref_ = db::next_ref(&state.pool).await?;
     sqlx::query(
-        "INSERT INTO assists (ref, title, status, category, owner_id, anonymous, goal, failures, environment, created_at)
+        "INSERT INTO assists (ref, title, status, category, owner_id, anonymous, description, insights, environment, created_at)
          VALUES (?, ?, 'open', ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&ref_)
@@ -87,8 +87,8 @@ pub async fn create(
     .bind(req.category.as_ref().map(db::enum_str))
     .bind(&viewer.id)
     .bind(req.anonymous as i64)
-    .bind(&req.goal)
-    .bind(serde_json::to_string(&req.failures).unwrap_or_else(|_| "[]".into()))
+    .bind(&req.description)
+    .bind(&req.insights)
     .bind(serde_json::to_string(&req.environment).unwrap_or_else(|_| "[]".into()))
     .bind(now_rfc3339())
     .execute(&state.pool)
@@ -102,9 +102,10 @@ pub async fn create(
     }
     for a in &req.artifacts {
         sqlx::query(
-            "INSERT OR IGNORE INTO assist_artifacts (assist_ref, id, kind, label, detail) VALUES (?, ?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO assist_artifacts (assist_ref, id, kind, label, detail, icon, pid) VALUES (?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&ref_).bind(&a.id).bind(&a.kind).bind(&a.label).bind(&a.detail)
+        .bind(&a.icon).bind(a.pid)
         .execute(&state.pool)
         .await?;
     }
@@ -163,10 +164,9 @@ fn build_record_draft(
     artifacts: &[AssistArtifact],
     requests: &[ScopeRequest],
 ) -> RecordFields {
-    let symptom = match row.failures.first() {
-        Some(f) => format!("{} ({})", f.label, f.note),
-        None => row.title.clone(),
-    };
+    // Real failure capture arrives with the detector (P1); until then the
+    // title is the most truthful symptom line available.
+    let symptom = row.title.clone();
     let scopes = requests
         .iter()
         .filter(|r| r.status == ScopeStatus::Approved && r.kind != ScopeKind::Comment)

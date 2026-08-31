@@ -271,18 +271,29 @@ async fn create_assist_persists_artifacts_and_tags() {
         "tags": ["ci", "build"],
         "category": "broken",
         "anonymous": false,
-        "goal": "Make builds reproducible.",
-        "failures": [{ "label": "diff dist/ between runs", "note": "exit 1" }],
+        "description": "Two builds of the same commit produce different chunk hashes.",
+        "insights": "",
         "environment": ["Node 20", "webpack 5"],
         "artifacts": [
-            { "id": "t1", "kind": "terminal", "label": "iTerm2", "detail": "npm run build" },
+            { "id": "t1", "kind": "terminal", "label": "iTerm2", "detail": "npm run build",
+              "icon": "data:image/png;base64,AAA", "pid": 4211 },
             { "id": "f1", "kind": "file", "label": "webpack.config.js", "detail": "repo root" }
         ]
     });
     let (status, v) = call(&app, "POST", "/api/assists", Some("u-meera"), Some(body)).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(v["ref"], "S-2412");
-    assert_eq!(v["artifacts"].as_array().unwrap().len(), 2);
+    let artifacts = v["artifacts"].as_array().unwrap();
+    assert_eq!(artifacts.len(), 2);
+    // Icon and pid persist for the Shared Artifacts list; absent stays null.
+    let terminal = artifacts.iter().find(|a| a["id"] == "t1").unwrap();
+    assert_eq!(terminal["icon"], "data:image/png;base64,AAA");
+    assert_eq!(terminal["pid"], 4211);
+    let file = artifacts.iter().find(|a| a["id"] == "f1").unwrap();
+    assert!(file["icon"].is_null());
+    assert!(file["pid"].is_null());
+    assert_eq!(v["insights"], "");
+    assert_eq!(v["description"], "Two builds of the same commit produce different chunk hashes.");
     assert_eq!(v["tags"], json!(["build", "ci"]));
     assert_eq!(v["status"], "open");
 
@@ -316,13 +327,14 @@ async fn live_data_requires_membership() {
     assert!(!v["terminal_feed"].as_array().unwrap().is_empty());
 }
 
-// ---- Brief drafting fallback ----
+// ---- Insights drafting fallback ----
 
 #[tokio::test]
-async fn draft_brief_falls_back_without_api_key() {
+async fn draft_brief_without_api_key_invents_nothing() {
     let app = app().await;
     let body = json!({
         "title": "Rollout stuck on image pull",
+        "description": "The pod never becomes ready.",
         "artifacts": [
             { "id": "t1", "kind": "terminal", "label": "iTerm2 (payments)", "detail": "kubectl" },
             { "id": "f1", "kind": "file", "label": "deployment.yaml", "detail": "k8s/payments - ref a3f9c1" }
@@ -330,9 +342,159 @@ async fn draft_brief_falls_back_without_api_key() {
     });
     let (status, v) = call(&app, "POST", "/api/assists/draft-brief", Some("u-meera"), Some(body)).await;
     assert_eq!(status, StatusCode::OK);
-    assert!(v["goal"].as_str().unwrap().contains("Rollout stuck on image pull"));
-    assert!(!v["failures"].as_array().unwrap().is_empty());
-    assert!(!v["environment"].as_array().unwrap().is_empty());
+    // No AI -> empty draft, never fabricated content. The UI shows N/A.
+    assert_eq!(v["insights"], "");
+    assert_eq!(v["environment"].as_array().unwrap().len(), 0);
+    assert!(v.get("failures").is_none());
+    assert!(v.get("goal").is_none());
+}
+
+// ---- User registration (per-machine identity) ----
+
+#[tokio::test]
+async fn register_user_creates_distinct_ids() {
+    let app = app().await;
+    let (status, first) = call(&app, "POST", "/api/users", None, Some(json!({ "name": "Ira K." }))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(first["id"], "u-ira-k");
+    assert_eq!(first["initials"], "IK");
+
+    let (status, second) = call(&app, "POST", "/api/users", None, Some(json!({ "name": "Ira K." }))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(second["id"], "u-ira-k-2");
+
+    let (status, _) = call(&app, "POST", "/api/users", None, Some(json!({ "name": "   " }))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // The new user works as an identity.
+    let (status, v) = call(&app, "GET", "/api/assists", Some("u-ira-k"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(v.as_array().unwrap().len(), 4);
+}
+
+// ---- Notifications: the owner/responder event loop ----
+
+/// The cursor comparison is inclusive (`>=`) so boundary events are never
+/// lost; the client dedupes by id. A short settle before reading a cursor
+/// keeps timestamps strictly ordered where a test asserts non-repetition.
+async fn settle() {
+    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+}
+
+#[tokio::test]
+async fn notifications_cover_request_decision_join_and_credit() {
+    let app = app().await;
+
+    // Bootstrap cursors (no `since` = no backlog).
+    let (_, boot) = call(&app, "GET", "/api/notifications", Some("u-meera"), None).await;
+    assert_eq!(boot["notifications"].as_array().unwrap().len(), 0);
+    let meera_cursor = boot["now"].as_str().unwrap().to_string();
+    let (_, boot) = call(&app, "GET", "/api/notifications", Some("u-devansh"), None).await;
+    let devansh_cursor = boot["now"].as_str().unwrap().to_string();
+
+    // Devansh joins Meera's assist and requests live debug.
+    call(&app, "POST", "/api/assists/S-2411/responders", Some("u-devansh"), None).await;
+    let (_, created) = call(
+        &app,
+        "POST",
+        "/api/assists/S-2411/scope-requests",
+        Some("u-devansh"),
+        Some(json!({ "kind": "live_debug", "reason": "quicker to trace this together" })),
+    )
+    .await;
+    let request_id = created["id"].as_i64().unwrap();
+    settle().await;
+
+    // Meera (owner) is notified of the join and the request.
+    let (_, v) = call(
+        &app,
+        "GET",
+        &format!("/api/notifications?since={meera_cursor}"),
+        Some("u-meera"),
+        None,
+    )
+    .await;
+    let kinds: Vec<&str> = v["notifications"]
+        .as_array().unwrap().iter().map(|n| n["kind"].as_str().unwrap()).collect();
+    assert!(kinds.contains(&"responder_joined"));
+    assert!(kinds.contains(&"scope_requested"));
+    let meera_cursor = v["now"].as_str().unwrap().to_string();
+
+    // Requester sees nothing yet; the owner approves; requester is notified.
+    call(&app, "POST", &format!("/api/scope-requests/{request_id}/approve"), Some("u-meera"), None).await;
+    let (_, v) = call(
+        &app,
+        "GET",
+        &format!("/api/notifications?since={devansh_cursor}"),
+        Some("u-devansh"),
+        None,
+    )
+    .await;
+    let decided: Vec<&serde_json::Value> = v["notifications"]
+        .as_array().unwrap().iter().filter(|n| n["kind"] == "scope_decided").collect();
+    assert_eq!(decided.len(), 1);
+    assert!(decided[0]["message"].as_str().unwrap().contains("approved"));
+    assert_eq!(decided[0]["assist_ref"], "S-2411");
+
+    // The cursor advances: Meera polling again sees no repeats of old events.
+    let (_, v) = call(
+        &app,
+        "GET",
+        &format!("/api/notifications?since={meera_cursor}"),
+        Some("u-meera"),
+        None,
+    )
+    .await;
+    assert!(v["notifications"]
+        .as_array().unwrap().iter().all(|n| n["kind"] != "responder_joined"));
+
+    // Closing with credit notifies the credited responder.
+    let (_, boot) = call(&app, "GET", "/api/notifications", Some("u-devansh"), None).await;
+    let devansh_cursor = boot["now"].as_str().unwrap().to_string();
+    call(
+        &app,
+        "POST",
+        "/api/assists/S-2411/close",
+        Some("u-meera"),
+        Some(json!({ "outcome": "resolved", "credited_user_ids": ["u-devansh"], "record": {} })),
+    )
+    .await;
+    let (_, v) = call(
+        &app,
+        "GET",
+        &format!("/api/notifications?since={devansh_cursor}"),
+        Some("u-devansh"),
+        None,
+    )
+    .await;
+    assert!(v["notifications"].as_array().unwrap().iter().any(|n| n["kind"] == "credited"));
+}
+
+#[tokio::test]
+async fn notifications_do_not_echo_your_own_actions() {
+    let app = app().await;
+    let (_, boot) = call(&app, "GET", "/api/notifications", Some("u-priya"), None).await;
+    let cursor = boot["now"].as_str().unwrap().to_string();
+
+    // Priya comments on Alex's assist; she must not be notified of it herself.
+    call(
+        &app,
+        "POST",
+        "/api/assists/S-2409/scope-requests",
+        Some("u-priya"),
+        Some(json!({ "kind": "comment", "reason": "checking the pool config" })),
+    )
+    .await;
+    let (_, v) = call(
+        &app,
+        "GET",
+        &format!("/api/notifications?since={cursor}"),
+        Some("u-priya"),
+        None,
+    )
+    .await;
+    // Comments auto-approve; that must not surface as a decision either.
+    assert_eq!(v["notifications"].as_array().unwrap().len(), 0);
 }
 
 // ---- Record draft prefill ----
@@ -342,7 +504,8 @@ async fn record_draft_prefills_from_brief_and_scopes() {
     let app = app().await;
     let (status, v) = call(&app, "GET", "/api/assists/S-2409/record-draft", Some("u-alex"), None).await;
     assert_eq!(status, StatusCode::OK);
-    assert!(v["symptom"].as_str().unwrap().contains("cargo test"));
+    // The title is the symptom until the detector captures real failures.
+    assert!(v["symptom"].as_str().unwrap().contains("migration deadlocks"));
     assert!(v["env_fingerprint"].as_str().unwrap().contains("Postgres 16"));
     // Seeded approved file scope shows up.
     assert!(v["scopes_that_mattered"].as_str().unwrap().contains("migrations/0007_orders.sql"));

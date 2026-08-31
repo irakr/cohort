@@ -10,7 +10,11 @@ export class ApiError extends Error {
 }
 
 async function request<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
-  const headers: Record<string, string> = { "X-User-Id": getCurrentUserId() };
+  const headers: Record<string, string> = {};
+  const userId = getCurrentUserId();
+  if (userId) {
+    headers["X-User-Id"] = userId;
+  }
   if (body !== undefined) {
     headers["Content-Type"] = "application/json";
   }

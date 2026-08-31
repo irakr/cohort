@@ -8,7 +8,7 @@ use sqlx::SqlitePool;
 use std::collections::HashMap;
 
 fn ago(minutes: i64) -> String {
-    (Utc::now() - Duration::minutes(minutes)).to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    (Utc::now() - Duration::minutes(minutes)).to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
 fn node(name: &str, path: &str, children: Vec<FileNode>) -> FileNode {
@@ -119,7 +119,8 @@ pub async fn seed(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .await?;
     }
 
-    // (ref, title, status, category, owner, created_at, goal, failures, environment, live_data, closed_at)
+    // (ref, title, status, category, owner, created_at, description, insights, environment, live_data, closed_at)
+    // Insights on seeds demo what the Cohort AI integration will produce.
     let assists: Vec<(&str, &str, &str, Option<&str>, &str, String, &str, &str, &str, Option<String>, Option<String>)> = vec![
         (
             "S-2411",
@@ -128,8 +129,8 @@ pub async fn seed(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             Some("broken"),
             "u-meera",
             ago(22),
-            "Get **payments-api 1.9.4** rolled out to `staging` before the release cut.\n- unblock the checkout team's release\n- see the [rollout runbook](#) for the standard steps",
-            r#"[{"label":"kubectl rollout status deploy/payments-api","note":"exit 1"},{"label":"ImagePullBackOff: payments-api-7c9f","note":"seen 6 turns"}]"#,
+            "Trying to get **payments-api 1.9.4** rolled out to `staging` before the release cut. The rollout hangs and the pod never becomes ready.",
+            "- intent: ship payments-api 1.9.4 to staging for the checkout release\n- the shared deployment pins image `registry.internal:5000/payments-api:1.9.4` at ref a3f9c1\n- values.yaml at that ref sets `imagePullSecrets: []`; the previous revision referenced `regcred`\n- most plausible direction: restore the pull secret and re-apply",
             r#"["Kubernetes 1.29","Helm 3.14","registry.internal:5000","Linux amd64"]"#,
             Some(serde_json::to_string(&k8s_live_data()).unwrap()),
             None,
@@ -141,8 +142,8 @@ pub async fn seed(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             Some("broken"),
             "u-alex",
             ago(60),
-            "Get the **orders settlement migration** past `cargo test` without deadlocking.\n- the same migration applies cleanly in dev\n- only the harness, which caps the pool at 2 connections, hits it",
-            r#"[{"label":"cargo test -p orders","note":"exit 101"},{"label":"deadlock detected on relation orders","note":"seen 4 turns"}]"#,
+            "The **orders settlement migration** deadlocks under `cargo test`, but applies cleanly in dev. Only the harness, which caps the pool at 2 connections, hits it.",
+            "- intent: land migration 0007 without deadlocking the orders table\n- the shared migration runs `CREATE INDEX CONCURRENTLY` inside a transaction\n- the harness caps the pool at 2 connections, which serializes the lock acquisition\n- most plausible direction: move the index build out of the transaction",
             r#"["Postgres 16","sqlx 0.8","Rust 1.88","Linux amd64"]"#,
             Some(serde_json::to_string(&pg_live_data()).unwrap()),
             None,
@@ -154,8 +155,8 @@ pub async fn seed(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             Some("environment"),
             "u-devansh",
             ago(180),
-            "Get the CI build green again.\n- `vite build` exits 137 on the CI runner\n- the same commit builds locally in 90s",
-            r#"[{"label":"vite build","note":"exit 137 (OOM) in CI"}]"#,
+            "`vite build` exits 137 on the CI runner; the same commit builds locally in about 90 seconds.",
+            "- intent: get the CI build green again\n- exit 137 on a 4 GB runner points at the OOM killer, not the build itself\n- most plausible direction: compare Node heap limits between CI and local",
             r#"["Node 20","Vite 5","CI runner: 4 GB","Linux amd64"]"#,
             None,
             None,
@@ -167,21 +168,21 @@ pub async fn seed(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             Some("broken"),
             "u-anika",
             ago(300),
-            "Keep long-lived gRPC streams open through the Envoy sidecar.",
-            r#"[{"label":"grpc stream RST_STREAM","note":"always at 60s"}]"#,
+            "Long-lived gRPC streams keep closing at exactly 60 seconds behind the Envoy sidecar.",
+            "- intent: keep long-lived gRPC streams open through the sidecar\n- an exact 60s cutoff matches Envoy's default `stream_idle_timeout`\n- most plausible direction: set `idle_timeout: 0s` on the listener",
             r#"["Envoy 1.30","grpc-go 1.64","Kubernetes 1.29"]"#,
             None,
             Some(ago(240)),
         ),
     ];
 
-    for (ref_, title, status, category, owner, created, goal, failures, env, live, closed) in assists {
+    for (ref_, title, status, category, owner, created, description, insights, env, live, closed) in assists {
         sqlx::query(
-            "INSERT INTO assists (ref, title, status, category, owner_id, anonymous, goal, failures, environment, live_data, created_at, closed_at)
+            "INSERT INTO assists (ref, title, status, category, owner_id, anonymous, description, insights, environment, live_data, created_at, closed_at)
              VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)",
         )
         .bind(ref_).bind(title).bind(status).bind(category).bind(owner)
-        .bind(goal).bind(failures).bind(env).bind(live).bind(created).bind(closed)
+        .bind(description).bind(insights).bind(env).bind(live).bind(created).bind(closed)
         .execute(pool)
         .await?;
     }

@@ -21,3 +21,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 [dev-dependencies]
 http-body-util = "0.1"
 tower = { version = "0.5", features = ["util"] }
+
+[features]
+# Enables the ts-rs export tests used by `make types`. Off by default so a
+# plain `cargo test` never writes TypeScript files.
+ts-export = []

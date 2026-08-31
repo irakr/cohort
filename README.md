@@ -14,19 +14,53 @@ resolution record. See `../project-plan.md` for the product plan.
 - `crates/cohort-hub/` - the hub server (Rust, axum, SQLite). Deployable to a
   commonly accessible server such as a company data centre. Optional LLM brief
   drafting via the Claude API, with a deterministic fallback.
-- `crates/cohort-agent/` - the owner agent module library. Stubbed detection
-  for the base version; the detector and scope enforcer land here later.
+- `crates/cohort-agent/` - the owner agent module library. Scans the machine
+  for real when the picker opens: interactive terminal sessions (process
+  table + tty, working directory via lsof on macOS / procfs on Linux),
+  running or installed AI agents (Claude Code session activity is read from
+  its transcript mtimes and recorded cwd; Cursor/Codex/Aider by process),
+  and up to 5 directories those are working in. Deeper session introspection
+  (Cursor OTLP, editor open-files) is marked TODO for the detector daemon
+  (P1); the scope enforcer also lands here later.
 
 ## Running
 
-Two processes:
+One hub, one app instance per machine:
 
     make dev-hub    # hub on 127.0.0.1:7400 (seeds SQLite on first run)
     make dev-app    # Tauri app (Vite dev server on :1420 + desktop window)
 
-The app's hub URL is a runtime setting (gear control in the left rail footer),
-default `http://127.0.0.1:7400`. Switch the acting user from the rail footer
-to walk owner and responder flows.
+On first launch the app shows a setup screen: enter the hub URL, then register
+your name (or continue as an existing user). The identity sticks to the
+machine; sign out from the gear menu in the rail.
+
+The app polls the hub and surfaces events as in-app toasts and native desktop
+notifications: requests and comments on assists you own, decisions on requests
+you made, responders joining, credits you received.
+
+### Two-machine walkthrough (owner + responder)
+
+1. Run the hub reachable by both machines:
+   `COHORT_BIND=0.0.0.0:7400 make dev-hub` (or the Docker image).
+2. Machine A: launch the app, point it at `http://<hub-host>:7400`, register
+   as the owner. Create an assist via the + button.
+3. Machine B: launch the app, same hub URL, register as the responder. Open
+   the assist, join, and request live debug.
+4. Machine A gets the notification, opens the assist, approves with one tap,
+   and grants further artifact access as requests come in.
+5. Machine B's live view unlocks within a poll (about 5s).
+
+### Platforms
+
+Tauri 2 targets macOS, Linux, and Windows; nothing here is platform-specific.
+Each machine builds natively. Linux needs the WebKitGTK toolchain, e.g. on
+Debian/Ubuntu:
+
+    sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \
+      libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+Note: `Cargo.lock` pins `notify-rust` to 4.11.7; newer versions require
+rustc 1.89+.
 
 Hub configuration (env):
 

@@ -7,4 +7,12 @@ export type AssistArtifact = { id: string,
 /**
  * "terminal" | "file" | "ai_agent" | "custom"
  */
-kind: string, label: string, detail: string, };
+kind: string, label: string, detail: string, 
+/**
+ * App icon as a data:image/png;base64 URI, when the scan resolved one.
+ */
+icon: string | null, 
+/**
+ * Process id at share time, for sessions and agents.
+ */
+pid: number | null, };

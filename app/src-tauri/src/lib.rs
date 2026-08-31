@@ -2,21 +2,22 @@
 //! (cohort-agent). The agent commands run locally; their output reaches the
 //! hub only when the owner explicitly shares it from the context picker.
 
-use cohort_agent::{AgentModule, ArtifactGroup, StubAgent};
+use cohort_agent::{AgentModule, ArtifactGroup, LocalAgent};
 
 #[tauri::command]
 fn suggest_artifacts() -> Vec<ArtifactGroup> {
-    StubAgent.suggest_artifacts()
+    LocalAgent.suggest_artifacts()
 }
 
 #[tauri::command]
 fn env_fingerprint() -> Vec<String> {
-    StubAgent.env_fingerprint()
+    LocalAgent.env_fingerprint()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![suggest_artifacts, env_fingerprint])
         .setup(|app| {
             if cfg!(debug_assertions) {

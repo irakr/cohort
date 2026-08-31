@@ -2,9 +2,17 @@
 import type { AssistArtifact } from "./AssistArtifact";
 import type { AssistStatus } from "./AssistStatus";
 import type { Category } from "./Category";
-import type { Failure } from "./Failure";
 import type { Grant } from "./Grant";
 import type { ScopeRequest } from "./ScopeRequest";
 import type { User } from "./User";
 
-export type AssistDetail = { ref: string, title: string, status: AssistStatus, category: Category | null, tags: Array<string>, owner_id: string, owner_name: string, anonymous: boolean, goal: string, failures: Array<Failure>, environment: Array<string>, artifacts: Array<AssistArtifact>, responders: Array<User>, scope_requests: Array<ScopeRequest>, grants: Array<Grant>, viewer_is_owner: boolean, viewer_is_responder: boolean, created_at: string, closed_at: string | null, };
+export type AssistDetail = { ref: string, title: string, status: AssistStatus, category: Category | null, tags: Array<string>, owner_id: string, owner_name: string, anonymous: boolean, 
+/**
+ * Owner-written problem statement (markdown).
+ */
+description: string, 
+/**
+ * AI-drafted analysis of the shared artifacts; empty until the Cohort AI
+ * integration is enabled (the UI shows N/A).
+ */
+insights: string, environment: Array<string>, artifacts: Array<AssistArtifact>, responders: Array<User>, scope_requests: Array<ScopeRequest>, grants: Array<Grant>, viewer_is_owner: boolean, viewer_is_responder: boolean, created_at: string, closed_at: string | null, };

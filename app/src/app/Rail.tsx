@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { List, Plus, Settings, User as UserIcon } from "lucide-react";
+import { List, LogOut, Plus, Settings, User as UserIcon } from "lucide-react";
 import { useApi } from "../api/hooks";
 import { getHubUrl, setHubUrl } from "../api/hubUrl";
 import type { User } from "../api/types";
@@ -7,10 +7,9 @@ import { AvatarChip, Modal } from "../components/ui";
 import { useNav } from "./router";
 
 export function Rail() {
-  const { screen, navigate, currentUserId, setUser } = useNav();
+  const { screen, navigate, currentUserId, signOut } = useNav();
   const { data: users } = useApi<User[]>("/api/users");
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [switcherOpen, setSwitcherOpen] = useState(false);
   const [urlDraft, setUrlDraft] = useState(getHubUrl());
 
   const onAssists = ["assists", "assist", "close"].includes(screen.name);
@@ -100,7 +99,7 @@ export function Rail() {
       </button>
 
       <button
-        title="Hub settings"
+        title="Settings"
         style={itemStyle(false)}
         onClick={() => {
           setUrlDraft(getHubUrl());
@@ -110,24 +109,20 @@ export function Rail() {
         <Settings size={17} />
       </button>
 
-      <button
-        title={currentUser ? `Acting as ${currentUser.name}` : "Switch user"}
-        onClick={() => setSwitcherOpen(true)}
-        style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0 }}
-      >
+      <span title={currentUser ? `Signed in as ${currentUser.name}` : "Signed in"}>
         <AvatarChip name={currentUser?.name ?? "?"} active size={30} />
-      </button>
+      </span>
 
       {settingsOpen && (
         <Modal width={420} onClose={() => setSettingsOpen(false)}>
-          <h3 style={{ fontSize: 16, marginBottom: 12 }}>Hub connection</h3>
+          <h3 style={{ fontSize: 16, marginBottom: 12 }}>Settings</h3>
           <div className="field">
             <label>Hub URL</label>
             <input
               className="input mono"
               value={urlDraft}
               onChange={(e) => setUrlDraft(e.target.value)}
-              placeholder="http://127.0.0.1:7400"
+              placeholder="http://hub.internal:7400"
             />
           </div>
           <p style={{ fontSize: 12.5, color: "var(--color-neutral-600)", margin: "10px 0 14px" }}>
@@ -136,6 +131,7 @@ export function Rail() {
           </p>
           <button
             className="btn btn-primary btn-block"
+            style={{ marginBottom: 10 }}
             onClick={() => {
               setHubUrl(urlDraft);
               setSettingsOpen(false);
@@ -144,37 +140,16 @@ export function Rail() {
           >
             Save
           </button>
-        </Modal>
-      )}
-
-      {switcherOpen && users && (
-        <Modal width={320} onClose={() => setSwitcherOpen(false)}>
-          <h3 style={{ fontSize: 16, marginBottom: 4 }}>Act as</h3>
-          <p style={{ fontSize: 12.5, color: "var(--color-neutral-600)", margin: "0 0 12px" }}>
-            Seeded users, for walking owner and responder flows.
-          </p>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {users.map((u) => (
-              <button
-                key={u.id}
-                className="btn"
-                style={{ justifyContent: "flex-start", gap: 10 }}
-                onClick={() => {
-                  setUser(u.id);
-                  setSwitcherOpen(false);
-                  navigate({ name: "assists" });
-                }}
-              >
-                <AvatarChip name={u.name} active={u.id === currentUserId} size={24} />
-                {u.name}
-                {u.id === currentUserId && (
-                  <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--color-neutral-500)" }}>
-                    current
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
+          <button
+            className="btn btn-block"
+            onClick={() => {
+              setSettingsOpen(false);
+              signOut();
+            }}
+          >
+            <LogOut size={13} />
+            Sign out{currentUser ? ` (${currentUser.name})` : ""}
+          </button>
         </Modal>
       )}
     </aside>
