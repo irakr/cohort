@@ -85,18 +85,19 @@ export async function installSshKey(publicKey: string, marker: string): Promise<
   }
 }
 
-/** Responder: open the system terminal running ssh to a granted target. */
-export async function openSsh(target: string): Promise<boolean> {
+/** Responder: open the system terminal running ssh to a granted target.
+    Resolves to null on success, or a message saying why it failed. */
+export async function openSsh(target: string): Promise<string | null> {
   if (!inTauri()) {
-    return false;
+    return "not running inside the Cohort app";
   }
   try {
     const { invoke } = await import("@tauri-apps/api/core");
     await invoke("open_ssh", { target });
-    return true;
+    return null;
   } catch (e) {
     console.error("open_ssh failed:", e);
-    return false;
+    return e instanceof Error ? e.message : String(e);
   }
 }
 

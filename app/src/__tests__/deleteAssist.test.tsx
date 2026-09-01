@@ -12,7 +12,7 @@ vi.mock("../api/agent", () => ({
   sshPublicKey: vi.fn(async () => null),
   sshTargetSuggestion: vi.fn(async () => ""),
   installSshKey: vi.fn(async () => false),
-  openSsh: vi.fn(async () => false),
+  openSsh: vi.fn(async () => null),
 }));
 
 describe("Delete assist", () => {

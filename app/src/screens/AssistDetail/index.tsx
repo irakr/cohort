@@ -377,6 +377,7 @@ export function AssistDetail({ assistRef }: { assistRef: string }) {
           act={act}
           onOpenFile={setViewFile}
           onRequestArtifacts={() => setRequestOpen(true)}
+          onNotice={setNotice}
         />
       )}
 
@@ -443,6 +444,7 @@ export function AssistDetail({ assistRef }: { assistRef: string }) {
         <RequestArtifactsModal
           assist={assist}
           busy={busy}
+          onNotice={setNotice}
           onClose={() => setRequestOpen(false)}
           onSubmit={(requests, reason) =>
             void act(async () => {
@@ -884,6 +886,7 @@ function ResponderPanel({
   act,
   onOpenFile,
   onRequestArtifacts,
+  onNotice,
 }: {
   assist: AssistDetailT;
   liveData: LiveData | null;
@@ -894,6 +897,7 @@ function ResponderPanel({
   act: (fn: () => Promise<unknown>) => Promise<void>;
   onOpenFile: (path: string) => void;
   onRequestArtifacts: () => void;
+  onNotice: (message: string) => void;
 }) {
   const [reason, setReason] = useState("");
 
@@ -1062,7 +1066,11 @@ function ResponderPanel({
                 className="btn btn-primary"
                 style={{ padding: "5px 12px", fontSize: 12 }}
                 title="Open an SSH session in your terminal"
-                onClick={() => void openSsh(sshGrant.target as string)}
+                onClick={() =>
+                  void openSsh(sshGrant.target as string).then((err) => {
+                    if (err) onNotice(`Could not open an SSH terminal. ${err}`);
+                  })
+                }
               >
                 Connect
               </button>
@@ -1227,11 +1235,13 @@ interface ReqCategory {
 function RequestArtifactsModal({
   assist,
   busy,
+  onNotice,
   onClose,
   onSubmit,
 }: {
   assist: AssistDetailT;
   busy: boolean;
+  onNotice: (message: string) => void;
   onClose: () => void;
   onSubmit: (
     requests: { kind: ScopeKind; target: string | null; payload: string | null }[],
@@ -1671,7 +1681,11 @@ function RequestArtifactsModal({
                           className="btn btn-primary"
                           style={{ padding: "4px 12px", fontSize: 12 }}
                           title="Open an SSH session in your terminal"
-                          onClick={() => void openSsh(c.target as string)}
+                          onClick={() =>
+                            void openSsh(c.target as string).then((err) => {
+                              if (err) onNotice(`Could not open an SSH terminal. ${err}`);
+                            })
+                          }
                         >
                           Connect
                         </button>

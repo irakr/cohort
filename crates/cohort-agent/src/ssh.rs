@@ -25,7 +25,19 @@ pub fn public_key(home: &Path) -> Option<String> {
     })
 }
 
-/// Suggested connection target for this machine: user@hostname.
+/// A hostname other machines can resolve. A bare short name (Linux
+/// `hostname` gives no domain) is only known locally, so suggest its mDNS
+/// form; a name that already carries a domain is left alone.
+pub fn reachable_host(raw: &str) -> String {
+    if raw.contains('.') {
+        raw.to_string()
+    } else {
+        format!("{raw}.local")
+    }
+}
+
+/// Suggested connection target for this machine: user@hostname. Only a
+/// suggestion - the owner edits it at approval time.
 pub fn target_suggestion() -> String {
     let user = std::env::var("USER")
         .or_else(|_| std::env::var("USERNAME"))
@@ -35,6 +47,7 @@ pub fn target_suggestion() -> String {
         .ok()
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .filter(|h| !h.is_empty())
+        .map(|h| reachable_host(&h))
         .unwrap_or_else(|| "host".into());
     format!("{user}@{host}")
 }
@@ -109,30 +122,125 @@ pub fn ssh_command(target: &str) -> Option<String> {
     })
 }
 
+/// Terminal emulators to try on Linux, the running desktop's own first.
+/// The x-terminal-emulator alternatives symlink comes late: it names what
+/// the distribution installed, not what the current session can run (on an
+/// XFCE session it may point at gnome-terminal, whose D-Bus activation
+/// hangs without a GNOME session).
+pub fn terminal_candidates(desktop: Option<&str>) -> Vec<&'static str> {
+    let desktop = desktop.unwrap_or("").to_ascii_lowercase();
+    let preferred = if desktop.contains("xfce") {
+        Some("xfce4-terminal")
+    } else if desktop.contains("kde") {
+        Some("konsole")
+    } else if desktop.contains("gnome") || desktop.contains("unity") || desktop.contains("ubuntu") {
+        Some("gnome-terminal")
+    } else {
+        None
+    };
+    let mut out: Vec<&'static str> = Vec::new();
+    out.extend(preferred);
+    for term in ["gnome-terminal", "konsole", "xfce4-terminal", "x-terminal-emulator", "xterm"] {
+        if !out.contains(&term) {
+            out.push(term);
+        }
+    }
+    out
+}
+
+/// The argument form that runs `command` inside the given emulator; they
+/// differ: xfce4-terminal takes the whole command line as one -e string,
+/// gnome-terminal wants `-- cmd args`, the rest take xterm-style `-e cmd
+/// args`. `command` is shell-safe by construction (see valid_target).
+pub fn terminal_args(program: &str, command: &str) -> Vec<String> {
+    match program {
+        "xfce4-terminal" => vec!["-e".into(), command.into()],
+        "gnome-terminal" => {
+            let mut args = vec!["--".to_string()];
+            args.extend(command.split_whitespace().map(str::to_string));
+            args
+        }
+        _ => {
+            let mut args = vec!["-e".to_string()];
+            args.extend(command.split_whitespace().map(str::to_string));
+            args
+        }
+    }
+}
+
 /// Open the system terminal running ssh to the target.
 pub fn open_terminal_ssh(target: &str) -> Result<(), String> {
     let command = ssh_command(target).ok_or_else(|| format!("invalid ssh target: {target}"))?;
     #[cfg(target_os = "macos")]
     {
-        let script = format!("tell application \"Terminal\" to do script \"{command}\"\nactivate application \"Terminal\"");
-        std::process::Command::new("osascript")
+        // When Terminal is not yet running, launching it opens its startup
+        // window; run the command in that window instead of a second one.
+        let script = format!(
+            "if application \"Terminal\" is running then\n\
+             tell application \"Terminal\" to do script \"{command}\"\n\
+             else\n\
+             tell application \"Terminal\" to do script \"{command}\" in window 1\n\
+             end if\n\
+             activate application \"Terminal\""
+        );
+        // Wait for osascript: it returns quickly, and a failure (e.g. the
+        // Automation permission for controlling Terminal was denied) only
+        // shows in its exit status and stderr.
+        let output = std::process::Command::new("osascript")
             .arg("-e")
             .arg(script)
-            .spawn()
+            .output()
             .map_err(|e| e.to_string())?;
+        if !output.status.success() {
+            return Err(format!(
+                "could not open Terminal: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
         Ok(())
     }
     #[cfg(target_os = "linux")]
     {
-        for term in ["x-terminal-emulator", "gnome-terminal", "konsole", "xterm"] {
-            let spawned = std::process::Command::new(term)
-                .args(["-e", "sh", "-c", &command])
-                .spawn();
-            if spawned.is_ok() {
-                return Ok(());
+        use std::io::Read;
+        let desktop = std::env::var("XDG_CURRENT_DESKTOP").ok();
+        let mut failures: Vec<String> = Vec::new();
+        for program in terminal_candidates(desktop.as_deref()) {
+            let mut child = match std::process::Command::new(program)
+                .args(terminal_args(program, &command))
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+            {
+                Ok(child) => child,
+                Err(_) => continue, // not installed
+            };
+            // A terminal that opens keeps running (or, like gnome-terminal
+            // on GNOME, hands off and exits 0). One given bad arguments or
+            // missing session infrastructure exits non-zero within moments:
+            // poll briefly so that falls through to the next candidate.
+            for _ in 0..4 {
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                match child.try_wait() {
+                    Ok(Some(status)) if status.success() => return Ok(()),
+                    Ok(Some(_)) => {
+                        let mut stderr = String::new();
+                        if let Some(mut pipe) = child.stderr.take() {
+                            let _ = pipe.read_to_string(&mut stderr);
+                        }
+                        failures.push(format!("{program}: {}", stderr.trim()));
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            if child.stderr.is_some() {
+                return Ok(()); // still running after the grace period
             }
         }
-        Err("no terminal emulator found".into())
+        if failures.is_empty() {
+            Err("no terminal emulator found".into())
+        } else {
+            Err(format!("could not open a terminal ({})", failures.join("; ")))
+        }
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
@@ -144,6 +252,47 @@ pub fn open_terminal_ssh(target: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn short_hostnames_get_the_mdns_suffix() {
+        assert_eq!(reachable_host("spark-b4de"), "spark-b4de.local");
+        assert_eq!(reachable_host("Iraks-MacBook-Pro.local"), "Iraks-MacBook-Pro.local");
+        assert_eq!(reachable_host("box.corp.example"), "box.corp.example");
+    }
+
+    #[test]
+    fn candidates_prefer_the_running_desktop() {
+        assert_eq!(terminal_candidates(Some("XFCE"))[0], "xfce4-terminal");
+        assert_eq!(terminal_candidates(Some("ubuntu:GNOME"))[0], "gnome-terminal");
+        assert_eq!(terminal_candidates(Some("KDE"))[0], "konsole");
+        // Unknown desktop: no preference, generic order with the
+        // alternatives symlink ahead of only the bare-X fallback.
+        let unknown = terminal_candidates(None);
+        assert_eq!(unknown.first(), Some(&"gnome-terminal"));
+        assert_eq!(unknown.last(), Some(&"xterm"));
+        // No duplicates when the preferred one is also in the generic list.
+        let xfce = terminal_candidates(Some("XFCE"));
+        assert_eq!(xfce.iter().filter(|t| **t == "xfce4-terminal").count(), 1);
+    }
+
+    #[test]
+    fn terminal_args_match_each_emulator() {
+        // xfce4-terminal: whole command line as one -e string.
+        assert_eq!(
+            terminal_args("xfce4-terminal", "ssh -p 2222 dev@host"),
+            vec!["-e", "ssh -p 2222 dev@host"]
+        );
+        // gnome-terminal: `--` then the words.
+        assert_eq!(
+            terminal_args("gnome-terminal", "ssh dev@host"),
+            vec!["--", "ssh", "dev@host"]
+        );
+        // xterm-style for the rest.
+        assert_eq!(
+            terminal_args("x-terminal-emulator", "ssh dev@host"),
+            vec!["-e", "ssh", "dev@host"]
+        );
+    }
 
     fn temp_home(name: &str) -> PathBuf {
         let home = std::env::temp_dir().join(format!("cohort-ssh-{}-{name}", std::process::id()));
