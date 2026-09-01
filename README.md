@@ -94,8 +94,10 @@ Versions are pinned so every machine builds the same thing:
 - Upgrade deliberately: bump `rust-toolchain.toml` (and the Dockerfile tag)
   on all machines at once, and commit lockfile changes with the bump.
 
-New machine bootstrap: install rustup and Node (`app/.nvmrc` pins the
-version; with nvm, `cd app && nvm install` reads it), then `make setup`.
+New machine: `make bootstrap` installs everything (system packages on
+Ubuntu, rustup, nvm, the pinned toolchain and Node from `app/.nvmrc`,
+npm 11, and all locked dependencies). After a pull on an already
+bootstrapped machine, `make setup` re-syncs the dependencies.
 
 ## Tests and types
 

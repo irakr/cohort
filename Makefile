@@ -7,9 +7,14 @@
 #   with --locked and npm installs with `npm ci`, so a drifted lockfile
 #   fails loudly instead of silently updating
 
-.PHONY: setup dev-hub dev-app types test test-hub test-app db-reset
+.PHONY: bootstrap setup dev-hub dev-app types test test-hub test-app db-reset
 
-# One-time per machine: install the pinned toolchain and exact npm deps.
+# Fresh machine: installs system packages, rustup, nvm, the pinned
+# toolchain/Node, and all locked dependencies. Idempotent.
+bootstrap:
+	./scripts/bootstrap.sh
+
+# Lighter re-sync when the tools already exist (e.g. after a pull).
 setup:
 	rustup show active-toolchain
 	cd app && npm ci
