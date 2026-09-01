@@ -38,10 +38,13 @@ export function FileTree({
   walk(nodes, 0);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column" }}>
+    // Natural width: rows wider than the card extend and the card's
+    // overflow container scrolls horizontally instead of truncating.
+    <div style={{ display: "flex", flexDirection: "column", width: "max-content", minWidth: "100%" }}>
       {rows.map(({ node, depth, isDir, open }) => (
         <button
           key={node.path}
+          title={node.name}
           onClick={() =>
             isDir
               ? setExpanded((e) => ({ ...e, [node.path]: !open }))
@@ -57,13 +60,15 @@ export function FileTree({
             font: "inherit",
             fontSize: 12.5,
             color: "var(--color-text)",
-            padding: "3px 6px",
+            padding: "2px 6px",
             paddingLeft: 4 + depth * 14,
             borderRadius: 6,
             textAlign: "left",
+            width: "100%",
+            minWidth: 0,
           }}
         >
-          <span style={{ width: 10, display: "inline-flex" }}>
+          <span style={{ width: 10, display: "inline-flex", flexShrink: 0 }}>
             {isDir && (
               <ChevronRight
                 size={10}
@@ -73,11 +78,11 @@ export function FileTree({
             )}
           </span>
           {isDir ? (
-            <Folder size={14} color="#64a8e8" fill="#64a8e8" />
+            <Folder size={14} color="#64a8e8" fill="#64a8e8" style={{ flexShrink: 0 }} />
           ) : (
-            <FileText size={13} color="var(--color-neutral-500)" />
+            <FileText size={13} color="var(--color-neutral-500)" style={{ flexShrink: 0 }} />
           )}
-          {node.name}
+          <span style={{ whiteSpace: "nowrap" }}>{node.name}</span>
         </button>
       ))}
     </div>

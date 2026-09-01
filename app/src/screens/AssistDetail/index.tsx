@@ -1042,7 +1042,11 @@ function ResponderPanel({
         <div className="card" style={{ gridColumn: "span 2", padding: 12 }}>
           <SectionTitle>Files and directories</SectionTitle>
           {liveData ? (
-            <FileTree nodes={liveData.file_tree} onOpenFile={onOpenFile} />
+            // Height-capped and scrollable so deep trees never stretch the
+            // grid; matches the terminal pane's height.
+            <div style={{ maxHeight: 300, overflow: "auto" }}>
+              <FileTree nodes={liveData.file_tree} onOpenFile={onOpenFile} />
+            </div>
           ) : (
             <Spinner size={14} />
           )}
