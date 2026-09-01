@@ -9,6 +9,12 @@
 
 .PHONY: bootstrap setup dev-hub dev-app types test test-hub test-app db-reset
 
+# Recipes run under bash, and any target that needs Node loads nvm first
+# when node is not already on PATH (make's non-interactive shell does not
+# read .bashrc, so an nvm-installed Node would otherwise be invisible).
+SHELL := /usr/bin/env bash
+NODE_ENV = if ! command -v npm >/dev/null 2>&1 && [ -s "$$HOME/.nvm/nvm.sh" ]; then source "$$HOME/.nvm/nvm.sh" >/dev/null; fi
+
 # Fresh machine: installs system packages, rustup, nvm, the pinned
 # toolchain/Node, and all locked dependencies. Idempotent.
 bootstrap:
@@ -17,13 +23,13 @@ bootstrap:
 # Lighter re-sync when the tools already exist (e.g. after a pull).
 setup:
 	rustup show active-toolchain
-	cd app && npm ci
+	@$(NODE_ENV); cd app && npm ci
 
 dev-hub:
 	cargo run --locked -p cohort-hub
 
 dev-app:
-	cd app && npx tauri dev
+	@$(NODE_ENV); cd app && npx tauri dev
 
 # Regenerate TypeScript bindings from the Rust wire types (committed).
 # The ts-export feature gates ts-rs's generated export tests, so a plain
@@ -36,7 +42,7 @@ test-hub:
 	cargo test --locked -p cohort-hub -p cohort-agent -p cohort-dirs
 
 test-app:
-	cd app && npm test
+	@$(NODE_ENV); cd app && npm test
 
 test: test-hub test-app
 
