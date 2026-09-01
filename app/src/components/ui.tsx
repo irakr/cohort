@@ -104,6 +104,56 @@ export function Modal({
   );
 }
 
+/** In-app confirmation dialog (the webview has no native confirm()). */
+export function ConfirmDialog({
+  title,
+  message,
+  confirmLabel,
+  busy = false,
+  onCancel,
+  onConfirm,
+}: {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  busy?: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Modal width={420} onClose={onCancel}>
+      <h3 style={{ fontSize: 16, marginBottom: 8 }}>{title}</h3>
+      <p style={{ fontSize: 13.5, color: "var(--color-neutral-700)", margin: "0 0 16px", lineHeight: 1.5 }}>
+        {message}
+      </p>
+      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+        <button className="btn" onClick={onCancel}>
+          Cancel
+        </button>
+        <button className="btn btn-primary" disabled={busy} onClick={onConfirm}>
+          {confirmLabel}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+/** In-app notice dialog, for errors and one-off messages. */
+export function NoticeDialog({ message, onClose }: { message: string; onClose: () => void }) {
+  return (
+    <Modal width={420} onClose={onClose}>
+      <p style={{ fontSize: 13.5, color: "var(--color-neutral-700)", margin: "0 0 16px", lineHeight: 1.5 }}>
+        {message}
+      </p>
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <button className="btn btn-primary" onClick={onClose}>
+          OK
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
 export function IconTile({
   bg,
   fg = "#fff",

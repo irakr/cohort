@@ -78,6 +78,7 @@ fn snapshot_artifacts(paths: Vec<String>) -> cohort_agent::snapshot::PathSnapsho
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             // All app logs (Rust `log` macros and forwarded webview console
             // output) go to the shared cohort namespace (see cohort-dirs):

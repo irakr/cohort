@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Award, Bot, FileText, Lock, Reply, Share } from "lucide-react";
 import { useApi } from "../../api/hooks";
 import type { MyRecord as MyRecordT } from "../../api/types";
-import { AvatarChip, IconTile, SectionTitle, Spinner, StatusDot } from "../../components/ui";
+import { AvatarChip, IconTile, NoticeDialog, SectionTitle, Spinner, StatusDot } from "../../components/ui";
 import { OUTCOME_LABELS } from "../../util";
 import { useNav } from "../../app/router";
 
@@ -10,6 +10,7 @@ export function MyRecord() {
   const { navigate } = useNav();
   const { data: record, loading, error } = useApi<MyRecordT>("/api/my-record");
   const [range, setRange] = useState("30d");
+  const [notice, setNotice] = useState<string | null>(null);
 
   if (loading) {
     return (
@@ -38,6 +39,7 @@ export function MyRecord() {
 
   return (
     <div style={{ maxWidth: 940, margin: "0 auto", padding: "34px 28px" }}>
+      {notice && <NoticeDialog message={notice} onClose={() => setNotice(null)} />}
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
         <h1 style={{ fontSize: 26, fontWeight: 700 }}>{record.user.name}</h1>
         <span
@@ -51,7 +53,7 @@ export function MyRecord() {
         <button
           className="btn btn-secondary"
           title="Sharing is an explicit export you choose; never a standing permission"
-          onClick={() => alert("Export arrives in a later phase. Nothing is shared until you do this.")}
+          onClick={() => setNotice("Export arrives in a later phase. Nothing is shared until you do this.")}
         >
           <Share size={13} /> Share
         </button>

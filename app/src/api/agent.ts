@@ -2,11 +2,8 @@
 // only what it truly detects on this machine; outside Tauri (vitest, plain
 // browser dev) there is no agent module, so there are no suggestions.
 
+import { inTauri } from "./tauri";
 import type { ArtifactGroup, PathSnapshot } from "./types";
-
-function inTauri(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-}
 
 export async function suggestArtifacts(): Promise<ArtifactGroup[]> {
   if (!inTauri()) {

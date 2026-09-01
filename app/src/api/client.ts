@@ -9,7 +9,7 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
+async function request<T>(method: "GET" | "POST" | "DELETE", path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = {};
   const userId = getCurrentUserId();
   if (userId) {
@@ -51,4 +51,8 @@ export function apiGet<T>(path: string): Promise<T> {
 
 export function apiPost<T>(path: string, body?: unknown): Promise<T> {
   return request<T>("POST", path, body ?? {});
+}
+
+export function apiDelete<T>(path: string): Promise<T> {
+  return request<T>("DELETE", path);
 }

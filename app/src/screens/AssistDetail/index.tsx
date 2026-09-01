@@ -13,6 +13,7 @@ import {
   Radio,
   Send,
   SquareTerminal,
+  Trash2,
   TerminalSquare,
   User as UserIcon,
   Users,
@@ -27,7 +28,7 @@ import {
   suggestArtifacts,
   terminalActivity,
 } from "../../api/agent";
-import { apiGet, apiPost } from "../../api/client";
+import { apiDelete, apiGet, apiPost } from "../../api/client";
 import { useApi } from "../../api/hooks";
 import type {
   AssistArtifact,
@@ -39,7 +40,16 @@ import type {
 } from "../../api/types";
 import { FileTree } from "../../components/FileTree";
 import { TerminalPane } from "../../components/TerminalPane";
-import { AvatarChip, IconTile, Modal, SectionTitle, Spinner, StatusPill } from "../../components/ui";
+import {
+  AvatarChip,
+  ConfirmDialog,
+  IconTile,
+  Modal,
+  NoticeDialog,
+  SectionTitle,
+  Spinner,
+  StatusPill,
+} from "../../components/ui";
 import { CATEGORY_LABELS, renderMarkdown, timeAgo, timeUntil } from "../../util";
 import { useNav } from "../../app/router";
 import { getCurrentUserId } from "../../api/currentUser";
@@ -64,6 +74,8 @@ export function AssistDetail({ assistRef }: { assistRef: string }) {
   const [requestOpen, setRequestOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [sshApprove, setSshApprove] = useState<ScopeRequest | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   // While the owner has an open assist on screen, their engine's current
   // scan (terminals, agents, suggested paths) is published to the hub so
@@ -163,8 +175,26 @@ export function AssistDetail({ assistRef }: { assistRef: string }) {
       await fn();
       refetch();
     } catch (e) {
-      alert(e instanceof Error ? e.message : String(e));
+      setNotice(e instanceof Error ? e.message : String(e));
     } finally {
+      setBusy(false);
+    }
+  }
+
+  // Owner-only, works for open and closed assists alike; deleting a closed
+  // assist also removes its resolution record and granted credits. The
+  // confirmation is the in-app ConfirmDialog rendered below.
+  async function performDelete() {
+    if (!assist) {
+      return;
+    }
+    setConfirmDelete(false);
+    setBusy(true);
+    try {
+      await apiDelete(`/api/assists/${assist.ref}`);
+      navigate({ name: "assists" });
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : String(e));
       setBusy(false);
     }
   }
@@ -268,6 +298,7 @@ export function AssistDetail({ assistRef }: { assistRef: string }) {
           act={act}
           onApprove={approveRequest}
           onClose={() => navigate({ name: "close", ref: assist.ref })}
+          onDelete={() => setConfirmDelete(true)}
         />
       )}
 
@@ -286,8 +317,33 @@ export function AssistDetail({ assistRef }: { assistRef: string }) {
       )}
 
       {assist.status === "done" && (
-        <div className="card" style={{ padding: 18, fontSize: 13.5, color: "var(--color-neutral-600)" }}>
-          This assist is closed. Its resolution record is kept indefinitely.
+        <div
+          className="card"
+          style={{
+            padding: 18,
+            fontSize: 13.5,
+            color: "var(--color-neutral-600)",
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+          }}
+        >
+          <span style={{ flex: 1 }}>
+            This assist is closed. Its resolution record is kept until the
+            assist is deleted.
+          </span>
+          {assist.viewer_is_owner && (
+            <button
+              className="btn"
+              style={{ color: "var(--color-accent-700)", flexShrink: 0 }}
+              title="Delete this assist, its resolution record and granted credits"
+              disabled={busy}
+              onClick={() => setConfirmDelete(true)}
+            >
+              <Trash2 size={13} />
+              Delete assist
+            </button>
+          )}
         </div>
       )}
 
@@ -340,6 +396,23 @@ export function AssistDetail({ assistRef }: { assistRef: string }) {
           }
         />
       )}
+
+      {confirmDelete && (
+        <ConfirmDialog
+          title="Delete assist"
+          message={
+            assist.status === "done"
+              ? `Delete ${assist.ref}? Its resolution record and any credits it granted are removed too. This cannot be undone.`
+              : `Delete ${assist.ref} and everything shared on it? This cannot be undone.`
+          }
+          confirmLabel="Delete"
+          busy={busy}
+          onCancel={() => setConfirmDelete(false)}
+          onConfirm={() => void performDelete()}
+        />
+      )}
+
+      {notice && <NoticeDialog message={notice} onClose={() => setNotice(null)} />}
 
       {sshApprove && (
         <SshApproveModal
@@ -600,12 +673,14 @@ function OwnerPanel({
   act,
   onApprove,
   onClose,
+  onDelete,
 }: {
   assist: AssistDetailT;
   busy: boolean;
   act: (fn: () => Promise<unknown>) => Promise<void>;
   onApprove: (r: ScopeRequest) => Promise<void>;
   onClose: () => void;
+  onDelete: () => void;
 }) {
   // Comments live in the Conversation section; this list is actionable only.
   const requests = assist.scope_requests.filter((r) => r.kind !== "comment");
@@ -692,10 +767,20 @@ function OwnerPanel({
         </section>
       )}
 
-      <div>
+      <div style={{ display: "flex", gap: 10 }}>
         <button className="btn btn-primary" onClick={onClose}>
           <Lock size={13} />
           Close assist
+        </button>
+        <button
+          className="btn"
+          style={{ color: "var(--color-accent-700)" }}
+          title="Delete this assist and everything shared on it"
+          disabled={busy}
+          onClick={onDelete}
+        >
+          <Trash2 size={13} />
+          Delete assist
         </button>
       </div>
     </div>

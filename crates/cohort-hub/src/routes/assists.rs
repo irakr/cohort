@@ -309,6 +309,53 @@ pub async fn close(
     Ok(Json(db::assist_detail(&state.pool, &ref_, &viewer).await?))
 }
 
+/// Delete an assist and everything hanging off it, owner-only. Closed
+/// assists are deletable too (owner's explicit choice): this also removes
+/// the resolution record and any credits it granted.
+pub async fn destroy(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(ref_): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let viewer = db::current_user(&state.pool, &headers).await?;
+    let row = db::assist_row(&state.pool, &ref_).await?;
+    if row.owner_id != viewer.id {
+        return Err(AppError::Forbidden("only the owner can delete an assist".into()));
+    }
+    let mut tx = state.pool.begin().await?;
+    sqlx::query("DELETE FROM credits WHERE assist_ref = ?")
+        .bind(&ref_)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM resolution_records WHERE assist_ref = ?")
+        .bind(&ref_)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM scope_requests WHERE assist_ref = ?")
+        .bind(&ref_)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM responders WHERE assist_ref = ?")
+        .bind(&ref_)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM assist_tags WHERE assist_ref = ?")
+        .bind(&ref_)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM assist_artifacts WHERE assist_ref = ?")
+        .bind(&ref_)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM assists WHERE ref = ?")
+        .bind(&ref_)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    tracing::info!(%ref_, owner = %viewer.id, "assist deleted");
+    Ok(Json(serde_json::json!({ "status": "deleted", "ref": ref_ })))
+}
+
 pub async fn record(
     State(state): State<AppState>,
     Path(ref_): Path<String>,

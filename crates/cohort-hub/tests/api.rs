@@ -350,6 +350,44 @@ async fn create_assist_persists_artifacts_and_tags() {
 }
 
 #[tokio::test]
+async fn delete_assist_rules_and_cascade() {
+    let app = app().await;
+
+    // Only the owner deletes.
+    let (status, _) = call(&app, "DELETE", "/api/assists/S-2409", Some("u-priya"), None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // Deleting a closed assist works and also removes its resolution record
+    // and granted credits (Alex loses the credit Anika gave on S-2398).
+    let (_, before) = call(&app, "GET", "/api/my-record", Some("u-alex"), None).await;
+    assert_eq!(before["credits_earned"], 1);
+    let (status, _) = call(&app, "DELETE", "/api/assists/S-2398", Some("u-anika"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(&app, "GET", "/api/assists/S-2398/record", Some("u-anika"), None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (_, after) = call(&app, "GET", "/api/my-record", Some("u-alex"), None).await;
+    assert_eq!(after["credits_earned"], 0);
+
+    // Owner deletes an open assist with responders, requests, tags, artifacts.
+    let (status, v) = call(&app, "DELETE", "/api/assists/S-2409", Some("u-alex"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(v["status"], "deleted");
+
+    let (status, _) = call(&app, "GET", "/api/assists/S-2409", Some("u-alex"), None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (_, list) = call(&app, "GET", "/api/assists", Some("u-alex"), None).await;
+    assert_eq!(list.as_array().unwrap().len(), 2);
+
+    // Nothing dangling: my-record and notifications still work for a
+    // responder of the deleted assist.
+    let (status, v) = call(&app, "GET", "/api/my-record", Some("u-priya"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(v["my_assists"].as_array().unwrap().iter().all(|r| r["ref"] != "S-2409"));
+    let (status, _) = call(&app, "GET", "/api/notifications", Some("u-priya"), None).await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
 async fn join_rules() {
     let app = app().await;
     let (status, v) = call(&app, "POST", "/api/assists/S-2411/responders", Some("u-alex"), None).await;

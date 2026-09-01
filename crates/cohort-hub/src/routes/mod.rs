@@ -21,7 +21,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/api/notifications", get(notifications::list))
         .route("/api/assists", get(assists::list).post(assists::create))
         .route("/api/assists/draft-brief", post(draft_brief::draft))
-        .route("/api/assists/{ref}", get(assists::detail))
+        .route("/api/assists/{ref}", get(assists::detail).delete(assists::destroy))
         .route("/api/assists/{ref}/responders", post(assists::join))
         .route(
             "/api/assists/{ref}/artifacts",

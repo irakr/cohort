@@ -60,7 +60,35 @@ export function mockHubFetch() {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input));
     let payload: unknown = { error: `no fixture for ${url.pathname}` };
-    if (url.pathname === "/api/users" && init?.method === "POST") {
+    if (url.pathname === "/api/assists/S-2409" && init?.method === "DELETE") {
+      payload = { status: "deleted", ref: "S-2409" };
+    } else if (url.pathname === "/api/assists/S-2409") {
+      payload = {
+        ref: "S-2409",
+        title: "My migration deadlocks only under the test harness and I'm out of ideas",
+        status: "open",
+        category: "broken",
+        tags: ["postgres"],
+        owner_id: "u-alex",
+        owner_name: "Alex",
+        anonymous: false,
+        description: "Deadlocks under the harness.",
+        insights: "",
+        environment: ["Postgres 16"],
+        artifacts: [],
+        responders: [{ id: "u-priya", name: "Priya", initials: "P" }],
+        scope_requests: [],
+        grants: [],
+        catalog: [],
+        catalog_at: null,
+        viewer_is_owner: true,
+        viewer_is_responder: false,
+        created_at: new Date(Date.now() - 60 * 60000).toISOString(),
+        closed_at: null,
+      };
+    } else if (url.pathname === "/api/assists/S-2409/artifacts") {
+      payload = { file_tree: [], files: {}, terminal_tabs: [], terminal_feed: [], agent_chat: [] };
+    } else if (url.pathname === "/api/users" && init?.method === "POST") {
       const body = JSON.parse(String(init.body)) as { name: string };
       payload = {
         id: `u-${body.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")}`,

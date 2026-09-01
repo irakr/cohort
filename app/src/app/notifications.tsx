@@ -1,16 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { apiGet } from "../api/client";
+import { inTauri } from "../api/tauri";
 import type { HubNotification, NotificationsResponse } from "../api/types";
 import { useNav } from "./router";
 
 const POLL_MS = 5000;
 const TOAST_MS = 9000;
 const MAX_SEEN = 500;
-
-function inTauri(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-}
 
 async function notifyNative(n: HubNotification) {
   if (!inTauri()) {

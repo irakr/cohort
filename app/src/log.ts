@@ -2,6 +2,8 @@
 // (<OS config dir>/cohort/app.log) via the Tauri log plugin, so frontend
 // and Rust logs land in one place. No-op outside Tauri (tests, browser dev).
 
+import { inTauri } from "./api/tauri";
+
 type Forwarder = (message: string) => Promise<void>;
 
 function format(args: unknown[]): string {
@@ -33,7 +35,7 @@ function forward(name: "log" | "info" | "warn" | "error" | "debug", logger: Forw
 }
 
 export async function initLogging(): Promise<void> {
-  if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
+  if (!inTauri()) {
     return;
   }
   try {
