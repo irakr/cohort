@@ -54,6 +54,20 @@ export async function terminalActivity(labels: string[]): Promise<string[] | nul
   return await invokeOrNull<string[]>("terminal_activity", { labels });
 }
 
+/** Owner: one JPEG frame of a granted window, or null on failure. */
+export async function captureWindow(target: string): Promise<Uint8Array | null> {
+  const b64 = await invokeOrNull<string>("capture_window", { target });
+  if (!b64) {
+    return null;
+  }
+  const raw = atob(b64);
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i += 1) {
+    bytes[i] = raw.charCodeAt(i);
+  }
+  return bytes;
+}
+
 /** This machine's SSH public key; null when none exists (or outside Tauri). */
 export async function sshPublicKey(): Promise<string | null> {
   return await invokeOrNull<string | null>("ssh_public_key");

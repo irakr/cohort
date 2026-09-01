@@ -29,6 +29,15 @@ fn terminal_activity(labels: Vec<String>) -> Vec<String> {
     cohort_agent::scan::terminal_activity(&labels)
 }
 
+/// Owner side: capture one JPEG frame of a granted window, returned as
+/// base64 (raw byte arrays are wasteful across the IPC boundary).
+#[tauri::command]
+fn capture_window(target: String) -> Result<String, String> {
+    use base64::Engine;
+    let bytes = cohort_agent::windows::capture_target(&target)?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+}
+
 fn home() -> std::path::PathBuf {
     std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default()
 }
@@ -108,6 +117,7 @@ pub fn run() {
             env_fingerprint,
             snapshot_artifacts,
             terminal_activity,
+            capture_window,
             ssh_public_key,
             ssh_target_suggestion,
             install_ssh_key,

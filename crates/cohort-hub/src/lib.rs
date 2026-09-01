@@ -11,15 +11,27 @@ use axum::http::{header, HeaderValue, Method};
 use axum::Router;
 use config::Config;
 use sqlx::SqlitePool;
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
+
+/// Newest mirrored frame for one window grant. Memory only, never persisted.
+#[derive(Clone)]
+pub struct Frame {
+    pub bytes: Vec<u8>,
+    pub at: String,
+}
+
+pub type FrameStore = Arc<Mutex<HashMap<(String, i64), Frame>>>;
 
 #[derive(Clone)]
 pub struct AppState {
     pub pool: SqlitePool,
     pub config: Arc<Config>,
     pub http: reqwest::Client,
+    /// In-memory frame relay for window mirroring (see routes::frames).
+    pub frames: FrameStore,
 }
 
 pub fn build_router(pool: SqlitePool, config: Config) -> Router {
@@ -30,13 +42,20 @@ pub fn build_router(pool: SqlitePool, config: Config) -> Router {
         .collect();
     let cors = CorsLayer::new()
         .allow_origin(origins)
-        .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS])
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
         .allow_headers([header::CONTENT_TYPE, header::HeaderName::from_static("x-user-id")]);
 
     let state = AppState {
         pool,
         config: Arc::new(config),
         http: reqwest::Client::new(),
+        frames: Arc::new(Mutex::new(HashMap::new())),
     };
     routes::api_router()
         .layer(cors)

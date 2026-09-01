@@ -87,6 +87,32 @@ pub async fn deny(
     decide(state, headers, id, "denied", None).await
 }
 
+/// One-click stop on an active grant (project plan non-negotiable 12).
+/// Owner-only; the grant disappears immediately and any relayed window
+/// frame is dropped.
+pub async fn revoke(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> Result<Json<ScopeRequest>, AppError> {
+    let viewer = db::current_user(&state.pool, &headers).await?;
+    let request = fetch(&state, id).await?;
+    let row = db::assist_row(&state.pool, &request.assist_ref).await?;
+    if row.owner_id != viewer.id {
+        return Err(AppError::Forbidden("only the owner revokes grants".into()));
+    }
+    if request.status != ScopeStatus::Approved {
+        return Err(AppError::BadRequest("only an active grant can be revoked".into()));
+    }
+    sqlx::query("UPDATE scope_requests SET status = 'revoked', decided_at = ? WHERE id = ?")
+        .bind(now_rfc3339())
+        .bind(id)
+        .execute(&state.pool)
+        .await?;
+    crate::routes::frames::clear_request_frame(&state, &request.assist_ref, id);
+    Ok(Json(fetch(&state, id).await?))
+}
+
 async fn decide(
     state: AppState,
     headers: HeaderMap,

@@ -121,7 +121,7 @@ pub async fn list(
          JOIN assists a ON a.ref = s.assist_ref
          JOIN users u ON u.id = a.owner_id
          WHERE s.requester_id = ? AND s.kind != 'comment'
-           AND s.status IN ('approved', 'denied')
+           AND s.status IN ('approved', 'denied', 'revoked')
            AND s.decided_at IS NOT NULL AND s.decided_at >= ?",
     )
     .bind(&viewer.id)
@@ -143,7 +143,11 @@ pub async fn list(
             assist_ref: r.get("assist_ref"),
             assist_title: r.get("title"),
             actor_name: owner.clone(),
-            message: format!("{owner} {status} your {what} request"),
+            message: if status == "revoked" {
+                format!("{owner} revoked your {what} access")
+            } else {
+                format!("{owner} {status} your {what} request")
+            },
             at: r.get("decided_at"),
         });
     }

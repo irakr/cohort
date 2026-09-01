@@ -1,12 +1,13 @@
 pub mod assists;
 pub mod draft_brief;
+pub mod frames;
 pub mod my_record;
 pub mod notifications;
 pub mod scope_requests;
 pub mod users;
 
 use crate::AppState;
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use serde_json::json;
 
@@ -34,5 +35,10 @@ pub fn api_router() -> Router<AppState> {
         .route("/api/assists/{ref}/record", get(assists::record))
         .route("/api/scope-requests/{id}/approve", post(scope_requests::approve))
         .route("/api/scope-requests/{id}/deny", post(scope_requests::deny))
+        .route("/api/scope-requests/{id}/revoke", post(scope_requests::revoke))
+        .route(
+            "/api/assists/{ref}/frames/{request_id}",
+            put(frames::put_frame).get(frames::get_frame),
+        )
         .route("/api/my-record", get(my_record::my_record))
 }

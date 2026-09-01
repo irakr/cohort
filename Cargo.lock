@@ -628,6 +628,7 @@ name = "cohort-agent"
 version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
+ "core-foundation",
  "serde",
  "serde_json",
  "ts-rs",
@@ -637,6 +638,7 @@ dependencies = [
 name = "cohort-app"
 version = "0.1.0"
 dependencies = [
+ "base64 0.23.1",
  "cohort-agent",
  "cohort-dirs",
  "log",

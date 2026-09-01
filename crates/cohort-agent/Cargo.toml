@@ -14,3 +14,6 @@ ts-rs = { workspace = true }
 # Enables the ts-rs export tests used by `make types`. Off by default so a
 # plain `cargo test` never writes TypeScript files.
 ts-export = []
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10"

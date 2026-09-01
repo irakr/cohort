@@ -305,6 +305,7 @@ pub async fn close(
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
+    crate::routes::frames::clear_assist_frames(&state, &ref_);
 
     Ok(Json(db::assist_detail(&state.pool, &ref_, &viewer).await?))
 }
@@ -352,6 +353,7 @@ pub async fn destroy(
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
+    crate::routes::frames::clear_assist_frames(&state, &ref_);
     tracing::info!(%ref_, owner = %viewer.id, "assist deleted");
     Ok(Json(serde_json::json!({ "status": "deleted", "ref": ref_ })))
 }

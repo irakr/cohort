@@ -20,6 +20,7 @@ import {
   X,
 } from "lucide-react";
 import {
+  captureWindow,
   installSshKey,
   openSsh,
   snapshotPaths,
@@ -28,7 +29,7 @@ import {
   suggestArtifacts,
   terminalActivity,
 } from "../../api/agent";
-import { apiDelete, apiGet, apiPost } from "../../api/client";
+import { apiDelete, apiGet, apiGetBlob, apiPost, apiPutBytes } from "../../api/client";
 import { useApi } from "../../api/hooks";
 import type {
   AssistArtifact,
@@ -54,6 +55,17 @@ import { CATEGORY_LABELS, renderMarkdown, timeAgo, timeUntil } from "../../util"
 import { useNav } from "../../app/router";
 import { getCurrentUserId } from "../../api/currentUser";
 
+/** Friendly form of a grant target; window targets carry "w-<id>|" first. */
+function displayTarget(kind: ScopeKind, target: string | null): string {
+  if (target === null) {
+    return "-";
+  }
+  if (kind === "window" && target.includes("|")) {
+    return target.split("|").slice(1).join("|");
+  }
+  return target;
+}
+
 export function AssistDetail({ assistRef }: { assistRef: string }) {
   const { navigate } = useNav();
   const me = getCurrentUserId();
@@ -75,6 +87,7 @@ export function AssistDetail({ assistRef }: { assistRef: string }) {
   const [busy, setBusy] = useState(false);
   const [sshApprove, setSshApprove] = useState<ScopeRequest | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [windowApprove, setWindowApprove] = useState<ScopeRequest | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   // While the owner has an open assist on screen, their engine's current
@@ -144,6 +157,43 @@ export function AssistDetail({ assistRef }: { assistRef: string }) {
     };
   }, [isOwnerOpen, assistRef]);
 
+  // Owner side: stream the granted windows as JPEG frames (~1.5s cadence)
+  // while this assist is on screen. The hub relays only the newest frame.
+  const grantedWindowsRef = useRef<{ id: number; target: string }[]>([]);
+  grantedWindowsRef.current = assist
+    ? assist.grants
+        .filter((g) => g.kind === "window" && g.target !== null)
+        .map((g) => ({ id: g.scope_request_id, target: g.target as string }))
+    : [];
+  useEffect(() => {
+    if (!isOwnerOpen) {
+      return;
+    }
+    let cancelled = false;
+    const tick = async () => {
+      for (const w of grantedWindowsRef.current) {
+        const bytes = await captureWindow(w.target);
+        if (cancelled) {
+          return;
+        }
+        if (!bytes) {
+          continue;
+        }
+        try {
+          await apiPutBytes(`/api/assists/${assistRef}/frames/${w.id}`, bytes);
+        } catch (e) {
+          console.error("frame upload failed:", e);
+        }
+      }
+    };
+    void tick();
+    const timer = setInterval(() => void tick(), 1500);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [isOwnerOpen, assistRef]);
+
   if (loading) {
     return (
       <div style={{ display: "grid", placeItems: "center", minHeight: "60vh" }}>
@@ -207,6 +257,10 @@ export function AssistDetail({ assistRef }: { assistRef: string }) {
   async function approveRequest(r: ScopeRequest) {
     if (r.kind === "ssh") {
       setSshApprove(r);
+      return;
+    }
+    if (r.kind === "window") {
+      setWindowApprove(r);
       return;
     }
     await act(async () => {
@@ -288,6 +342,49 @@ export function AssistDetail({ assistRef }: { assistRef: string }) {
           ))}
         </span>
       </div>
+
+      {assist.viewer_is_owner &&
+        assist.grants.some((g) => g.kind === "window") && (
+          <div
+            style={{
+              position: "sticky",
+              top: 10,
+              zIndex: 40,
+              background: "var(--color-accent-100)",
+              border: "1px solid var(--color-accent-300)",
+              borderRadius: 10,
+              padding: "10px 14px",
+              marginBottom: 18,
+              display: "flex",
+              flexDirection: "column",
+              gap: 6,
+            }}
+          >
+            {assist.grants
+              .filter((g) => g.kind === "window")
+              .map((g) => (
+                <div key={g.scope_request_id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span
+                    className="pulse"
+                    style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--color-accent)" }}
+                  />
+                  <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--color-accent-800)", flex: 1 }}>
+                    Sharing window: {displayTarget("window", g.target)} with {g.granted_to_name}
+                  </span>
+                  <button
+                    className="btn"
+                    style={{ padding: "4px 12px", fontSize: 12, color: "var(--color-accent-700)" }}
+                    disabled={busy}
+                    onClick={() =>
+                      void act(() => apiPost(`/api/scope-requests/${g.scope_request_id}/revoke`))
+                    }
+                  >
+                    Stop
+                  </button>
+                </div>
+              ))}
+          </div>
+        )}
 
       <Brief assist={assist} />
 
@@ -413,6 +510,21 @@ export function AssistDetail({ assistRef }: { assistRef: string }) {
       )}
 
       {notice && <NoticeDialog message={notice} onClose={() => setNotice(null)} />}
+
+      {windowApprove && (
+        <ConfirmDialog
+          title="Share this window?"
+          message={`${windowApprove.requester_name} will see "${displayTarget("window", windowApprove.target)}" live, pixel for pixel. Everything visible in that window is shared raw - nothing can be redacted. View-only; a sharing indicator with a Stop button stays on this assist, and the grant expires automatically.`}
+          confirmLabel="Share window"
+          busy={busy}
+          onCancel={() => setWindowApprove(null)}
+          onConfirm={() => {
+            const request = windowApprove;
+            setWindowApprove(null);
+            void act(() => apiPost(`/api/scope-requests/${request.id}/approve`));
+          }}
+        />
+      )}
 
       {sshApprove && (
         <SshApproveModal
@@ -664,7 +776,7 @@ function requestTitle(r: ScopeRequest): string {
   if (r.kind === "live_debug") {
     return "Live debug request";
   }
-  return r.target ?? r.kind;
+  return displayTarget(r.kind, r.target) === "-" ? r.kind : displayTarget(r.kind, r.target);
 }
 
 function OwnerPanel({
@@ -755,12 +867,23 @@ function OwnerPanel({
               >
                 <span className="tag tag-accent">{g.kind}</span>
                 <span className="mono" style={{ flex: 1 }}>
-                  {g.target ?? "-"}
+                  {displayTarget(g.kind, g.target)}
                 </span>
                 <span style={{ color: "var(--color-neutral-600)" }}>{g.granted_to_name}</span>
                 <span style={{ color: "var(--color-neutral-500)", fontSize: 11.5 }}>
                   {g.expires_at ? `expires ${timeUntil(g.expires_at)}` : "until close"}
                 </span>
+                <button
+                  className="btn"
+                  style={{ padding: "3px 10px", fontSize: 11.5, color: "var(--color-accent-700)" }}
+                  title="Revoke this grant now"
+                  disabled={busy}
+                  onClick={() =>
+                    void act(() => apiPost(`/api/scope-requests/${g.scope_request_id}/revoke`))
+                  }
+                >
+                  Revoke
+                </button>
               </div>
             ))}
           </div>
@@ -1008,7 +1131,87 @@ function ResponderPanel({
             <GatedNote pending={!!sshPending} label="Device access" />
           )}
         </div>
+
+        {grantFor("window") && (
+          <div style={{ gridColumn: "1 / -1" }}>
+            <WindowPane assistRef={assist.ref} grant={grantFor("window") as Grant} />
+          </div>
+        )}
       </div>
+    </div>
+  );
+}
+
+// Live view of a granted application window: the owner's engine streams
+// JPEG frames through the hub's in-memory relay; this pane follows them.
+function WindowPane({ assistRef, grant }: { assistRef: string; grant: Grant }) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [stale, setStale] = useState(true);
+
+  useEffect(() => {
+    let stopped = false;
+    let currentUrl: string | null = null;
+    const tick = async () => {
+      try {
+        const blob = await apiGetBlob(`/api/assists/${assistRef}/frames/${grant.scope_request_id}`);
+        if (stopped) {
+          return;
+        }
+        if (blob) {
+          const url = URL.createObjectURL(blob);
+          setSrc((prev) => {
+            if (prev) {
+              URL.revokeObjectURL(prev);
+            }
+            return url;
+          });
+          currentUrl = url;
+          setStale(false);
+        } else {
+          setStale(true);
+        }
+      } catch {
+        if (!stopped) {
+          setStale(true);
+        }
+      }
+    };
+    void tick();
+    const timer = setInterval(() => void tick(), 1500);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+      if (currentUrl) {
+        URL.revokeObjectURL(currentUrl);
+      }
+    };
+  }, [assistRef, grant.scope_request_id]);
+
+  return (
+    <div className="card" style={{ padding: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+        <AppWindow size={14} color="var(--color-neutral-700)" />
+        <span style={{ fontSize: 13, fontWeight: 700 }}>
+          {displayTarget("window", grant.target)}
+        </span>
+        <span
+          className={stale ? "tag tag-neutral" : "tag tag-accent"}
+          style={{ marginLeft: "auto", fontSize: 10.5 }}
+        >
+          {stale ? "waiting for the owner" : "live - view only"}
+        </span>
+      </div>
+      {src ? (
+        <img
+          src={src}
+          alt="Shared application window"
+          style={{ width: "100%", borderRadius: 8, display: "block" }}
+        />
+      ) : (
+        <p style={{ fontSize: 12.5, color: "var(--color-neutral-500)", margin: 0 }}>
+          No frame yet. The owner's engine streams while they view this assist.
+        </p>
+      )}
     </div>
   );
 }
@@ -1211,10 +1414,12 @@ function RequestArtifactsModal({
       subs: [
         {
           name: "Open windows",
-          rows: catalogFor("window").map((i) => catalogRow(i, "window", i.label)),
+          rows: catalogFor("window").map((i) =>
+            catalogRow(i, "window", `${i.id}|${i.label}: ${i.detail}`),
+          ),
         },
       ],
-      note: "Window enumeration on the owner's machine arrives with the mirroring milestone.",
+      note: `No application windows detected on ${assist.owner_name}'s machine right now.`,
     },
     {
       id: "ssh",

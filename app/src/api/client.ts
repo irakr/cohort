@@ -56,3 +56,37 @@ export function apiPost<T>(path: string, body?: unknown): Promise<T> {
 export function apiDelete<T>(path: string): Promise<T> {
   return request<T>("DELETE", path);
 }
+
+/** PUT raw JPEG bytes (window frame relay). */
+export async function apiPutBytes(path: string, bytes: Uint8Array): Promise<void> {
+  const headers: Record<string, string> = { "Content-Type": "image/jpeg" };
+  const userId = getCurrentUserId();
+  if (userId) {
+    headers["X-User-Id"] = userId;
+  }
+  const response = await fetch(`${getHubUrl()}${path}`, {
+    method: "PUT",
+    headers,
+    body: bytes as unknown as BodyInit,
+  });
+  if (!response.ok) {
+    throw new ApiError(response.status, `frame upload failed (${response.status})`);
+  }
+}
+
+/** GET binary content; null when no frame exists yet (404). */
+export async function apiGetBlob(path: string): Promise<Blob | null> {
+  const headers: Record<string, string> = {};
+  const userId = getCurrentUserId();
+  if (userId) {
+    headers["X-User-Id"] = userId;
+  }
+  const response = await fetch(`${getHubUrl()}${path}`, { headers });
+  if (response.status === 404) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new ApiError(response.status, `frame fetch failed (${response.status})`);
+  }
+  return await response.blob();
+}

@@ -19,6 +19,7 @@ pub mod icons;
 pub mod scan;
 pub mod snapshot;
 pub mod ssh;
+pub mod windows;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[cfg_attr(feature = "ts-export", ts(export))]
@@ -133,7 +134,7 @@ mod tests {
         for group in &groups {
             assert!(!group.items.is_empty());
             for item in &group.items {
-                assert!(["terminal", "file", "ai_agent"].contains(&item.kind.as_str()));
+                assert!(["terminal", "file", "ai_agent", "window"].contains(&item.kind.as_str()));
             }
         }
     }

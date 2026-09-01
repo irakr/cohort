@@ -382,9 +382,13 @@ pub fn scan(home: &Path) -> Vec<crate::ArtifactGroup> {
     let terminal_dirs: Vec<String> = terminals.iter().map(|t| t.detail.clone()).collect();
     let directories = directory_artifacts(&terminal_dirs, agent_cwd.as_deref(), home);
 
+    let windows = crate::windows::list_windows();
     let mut groups = Vec::new();
     if !terminals.is_empty() {
         groups.push(crate::ArtifactGroup { title: "Terminals".into(), items: terminals });
+    }
+    if !windows.is_empty() {
+        groups.push(crate::ArtifactGroup { title: "Windows".into(), items: windows });
     }
     if !directories.is_empty() {
         groups.push(crate::ArtifactGroup { title: "Files".into(), items: directories });

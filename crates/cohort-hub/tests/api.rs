@@ -309,6 +309,86 @@ async fn catalog_and_ssh_key_flow() {
     assert_eq!(grant["target"], "alex@spark-b4de.local");
 }
 
+#[tokio::test]
+async fn window_grants_frames_and_revoke() {
+    let app = app().await;
+
+    async fn frame_put(app: &Router, user: &str, path: &str, bytes: Vec<u8>) -> StatusCode {
+        let request = Request::builder()
+            .method("PUT")
+            .uri(path)
+            .header("x-user-id", user)
+            .header("content-type", "image/jpeg")
+            .body(Body::from(bytes))
+            .unwrap();
+        app.clone().oneshot(request).await.unwrap().status()
+    }
+
+    // Priya (responder on S-2409) requests a window; Alex approves.
+    let (_, created) = call(
+        &app, "POST", "/api/assists/S-2409/scope-requests", Some("u-priya"),
+        Some(json!({
+            "kind": "window",
+            "target": "w-771|Google Chrome: Grafana - payments",
+            "reason": "want to see the dashboard you see"
+        })),
+    ).await;
+    let id = created["id"].as_i64().unwrap();
+
+    // No frames before the grant exists.
+    let frame_path = format!("/api/assists/S-2409/frames/{id}");
+    assert_eq!(frame_put(&app, "u-alex", &frame_path, vec![1, 2, 3]).await, StatusCode::BAD_REQUEST);
+
+    call(&app, "POST", &format!("/api/scope-requests/{id}/approve"), Some("u-alex"), None).await;
+
+    // Only the owner uploads; frames are size-capped.
+    assert_eq!(frame_put(&app, "u-priya", &frame_path, vec![1]).await, StatusCode::FORBIDDEN);
+    // Oversized frames are rejected by axum's default 2MB body limit.
+    assert_eq!(
+        frame_put(&app, "u-alex", &frame_path, vec![0; 3 * 1024 * 1024]).await,
+        StatusCode::PAYLOAD_TOO_LARGE
+    );
+    assert_eq!(frame_put(&app, "u-alex", &frame_path, vec![9, 9, 9]).await, StatusCode::OK);
+
+    // The grant holder reads the frame; other users do not.
+    let request = Request::builder()
+        .method("GET").uri(&frame_path).header("x-user-id", "u-priya")
+        .body(Body::empty()).unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "image/jpeg");
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(bytes.as_ref(), &[9, 9, 9]);
+    let (status, _) = call(&app, "GET", &frame_path, Some("u-devansh"), None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // Revoke: owner-only, one click; grant and frame disappear, responder
+    // is notified with "revoked ... access".
+    let (_, boot) = call(&app, "GET", "/api/notifications", Some("u-priya"), None).await;
+    let cursor = boot["now"].as_str().unwrap().to_string();
+    let (status, _) = call(&app, "POST", &format!("/api/scope-requests/{id}/revoke"), Some("u-priya"), None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, revoked) = call(&app, "POST", &format!("/api/scope-requests/{id}/revoke"), Some("u-alex"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(revoked["status"], "revoked");
+
+    let (_, detail) = call(&app, "GET", "/api/assists/S-2409", Some("u-priya"), None).await;
+    assert!(detail["grants"].as_array().unwrap().iter().all(|g| g["kind"] != "window"));
+    let (status, _) = call(&app, "GET", &frame_path, Some("u-priya"), None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST); // no active grant anymore
+    let (status, _) = call(&app, "POST", &format!("/api/scope-requests/{id}/revoke"), Some("u-alex"), None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST); // cannot revoke twice
+
+    settle().await;
+    let (_, v) = call(
+        &app, "GET", &format!("/api/notifications?since={cursor}"), Some("u-priya"), None,
+    ).await;
+    assert!(v["notifications"].as_array().unwrap().iter().any(|n| {
+        let m = n["message"].as_str().unwrap();
+        m.contains("revoked your application window view") && m.ends_with("access")
+    }));
+}
+
 // ---- Create and join ----
 
 #[tokio::test]

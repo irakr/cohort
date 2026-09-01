@@ -70,6 +70,8 @@ pub enum ScopeStatus {
     Pending,
     Approved,
     Denied,
+    /// An approved grant the owner stopped with one click.
+    Revoked,
 }
 
 /// An artifact the owner selected or added when opening the assist.
