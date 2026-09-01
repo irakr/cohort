@@ -87,7 +87,7 @@ export function mockHubFetch() {
         closed_at: null,
       };
     } else if (url.pathname === "/api/assists/S-2409/artifacts") {
-      payload = { file_tree: [], files: {}, terminal_tabs: [], terminal_feed: [], agent_chat: [] };
+      payload = { file_tree: [], files: {}, agent_chat: [] };
     } else if (url.pathname === "/api/users" && init?.method === "POST") {
       const body = JSON.parse(String(init.body)) as { name: string };
       payload = {

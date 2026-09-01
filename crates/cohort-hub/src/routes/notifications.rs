@@ -19,7 +19,6 @@ fn kind_label(kind: &str) -> &'static str {
     match kind {
         "live_debug" => "live debug",
         "file" => "file access",
-        "terminal" => "terminal stream",
         "agents" => "agents view",
         "ssh" => "device access",
         "window" => "application window view",

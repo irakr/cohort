@@ -50,21 +50,6 @@ fn k8s_live_data() -> LiveData {
             node("rollout.log", "rollout.log", vec![]),
         ],
         files,
-        terminal_tabs: vec!["iTerm2 (payments)".into(), "VS Code (zsh)".into()],
-        terminal_feed: vec![
-            "$ kubectl rollout status deploy/payments-api".into(),
-            "Waiting for deployment rollout to finish: 0 of 3 updated replicas are available...".into(),
-            "error: deployment exceeded its progress deadline".into(),
-            "$ kubectl get pods -l app=payments-api".into(),
-            "NAME                          READY  STATUS             RESTARTS  AGE\npayments-api-7c9f-2xk4d       0/1    ImagePullBackOff   0         6m".into(),
-            "$ helm upgrade payments ./charts/payments --dry-run".into(),
-            "Release \"payments\" has been upgraded. Happy Helming!".into(),
-            "$ kubectl get events --field-selector involvedObject.name=payments-api-7c9f".into(),
-            "6m    Warning   Failed      pod/payments-api-7c9f   Error: ImagePullBackOff".into(),
-            "$ git diff a3f9c1^ -- charts/payments/values.yaml".into(),
-            "-  imagePullSecrets:\n-    - name: regcred\n+  imagePullSecrets: []".into(),
-            "$ export REGISTRY_TOKEN=************  (redacted on egress)".into(),
-        ],
         agent_chat: vec![
             ChatMsg { who: "Priya".into(), text: "Which registry is the deployment pulling from, and does the pinned values.yaml override it?".into() },
             ChatMsg { who: "Agent - owner machine".into(), text: "deployment.yaml uses image `registry.internal:5000/payments-api:1.9.4`. values.yaml sets imagePullSecrets: []. The secret referenced in the previous revision is absent from the pinned ref.".into() },
@@ -88,13 +73,6 @@ fn pg_live_data() -> LiveData {
             node("src", "src", vec![node("db.rs", "src/db.rs", vec![])]),
         ],
         files,
-        terminal_tabs: vec!["cargo test (orders)".into()],
-        terminal_feed: vec![
-            "$ cargo test -p orders -- --test-threads=4".into(),
-            "test settle_batch ... FAILED".into(),
-            "Error: database error: deadlock detected".into(),
-            "DETAIL: Process 4114 waits for ShareLock on transaction 9021; blocked by process 4117.".into(),
-        ],
         agent_chat: vec![],
     }
 }
@@ -205,9 +183,7 @@ pub async fn seed(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     for (ref_, id, kind, label, detail) in [
         ("S-2411", "f1", "file", "deployment.yaml", "k8s/payments - ref a3f9c1"),
         ("S-2411", "f2", "file", "kustomization.yaml", "k8s/payments - ref a3f9c1"),
-        ("S-2411", "t1", "terminal", "iTerm2 (payments)", "kubectl - read-only stream"),
         ("S-2409", "f1", "file", "0007_orders.sql", "migrations - ref 71bd44"),
-        ("S-2409", "t1", "terminal", "cargo test (orders)", "read-only stream"),
         ("S-2409", "a1", "ai_agent", "Claude Code", "agent session - 41 turns"),
     ] {
         sqlx::query(
@@ -237,8 +213,6 @@ pub async fn seed(pool: &SqlitePool) -> Result<(), sqlx::Error> {
          "approved", None, ago(40), Some(ago(40))),
         ("S-2409", "u-priya", "file", Some("migrations/0007_orders.sql"),
          "want to see the lock order in that migration", "approved", Some(240), ago(38), Some(ago(35))),
-        ("S-2409", "u-arun", "terminal", Some("cargo test (orders)"),
-         "need the failing test output, not the summary", "pending", Some(240), ago(30), None),
         ("S-2409", "u-priya", "live_debug", None,
          "quicker to trace this together", "pending", None, ago(12), None),
     ];

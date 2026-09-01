@@ -46,14 +46,6 @@ async function invokeOrNull<T>(command: string, args?: Record<string, unknown>):
   }
 }
 
-/** Owner: process activity in the granted terminals (feed lines per tty). */
-export async function terminalActivity(labels: string[]): Promise<string[] | null> {
-  if (labels.length === 0) {
-    return null;
-  }
-  return await invokeOrNull<string[]>("terminal_activity", { labels });
-}
-
 /** Owner: one JPEG frame of a granted window, or null on failure. */
 export async function captureWindow(target: string): Promise<Uint8Array | null> {
   const b64 = await invokeOrNull<string>("capture_window", { target });

@@ -3,6 +3,6 @@ import type { ArtifactCandidate } from "./ArtifactCandidate";
 
 export type ArtifactGroup = { 
 /**
- * "Terminals" | "Files" | "AI agents"
+ * "Files" | "AI agents" | "Windows"
  */
 title: string, items: Array<ArtifactCandidate>, };

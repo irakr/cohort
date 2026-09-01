@@ -168,7 +168,7 @@ pub async fn set_live_data(
 }
 
 /// Owner-published catalog: what the owner's engine currently sees (running
-/// terminals, agents, suggested paths). Populates the responder's request
+/// agents, application windows, suggested paths). Populates the responder's request
 /// wizard; refreshed while the owner has the assist open.
 pub async fn set_catalog(
     State(state): State<AppState>,
@@ -193,7 +193,7 @@ pub async fn set_catalog(
     Ok(Json(serde_json::json!({ "status": "ok" })))
 }
 
-/// Live data (file tree, file contents, terminal feed, agent chat).
+/// Live data (file tree, file contents, agent chat).
 /// The client gates each pane on the viewer's grants; when the owner agent
 /// module streams for real, enforcement moves server-side with it.
 pub async fn live_data(

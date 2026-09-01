@@ -5,11 +5,11 @@
 //! stays local until the owner explicitly shares it.
 //!
 //! Detection is real and scoped to what the machine can cheaply reveal (see
-//! [`scan`]): interactive terminal sessions with their working directories,
-//! running or installed AI agents (with Claude Code session activity from its
-//! transcripts), and the directories those point at. The detector daemon (P1)
-//! deepens this with telemetry; the picker's manual "Add artifacts" covers
-//! anything the scan cannot see.
+//! [`scan`]): running or installed AI agents (with Claude Code session
+//! activity from its transcripts), visible application windows, and the
+//! working directories the machine's shells and agents point at. The
+//! detector daemon (P1) deepens this with telemetry; the picker's manual
+//! "Add artifacts" covers anything the scan cannot see.
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -26,7 +26,7 @@ pub mod windows;
 pub struct ArtifactCandidate {
     /// Stable id within the suggestion set, e.g. "a-claude".
     pub id: String,
-    /// Picker kind: "terminal" | "file" | "ai_agent" | "custom".
+    /// Picker kind: "file" | "ai_agent" | "window" | "custom".
     pub kind: String,
     /// 2-3 char icon badge, e.g. "CC", "YML".
     pub badge: String,
@@ -46,7 +46,7 @@ pub struct ArtifactCandidate {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[cfg_attr(feature = "ts-export", ts(export))]
 pub struct ArtifactGroup {
-    /// "Terminals" | "Files" | "AI agents"
+    /// "Files" | "AI agents" | "Windows"
     pub title: String,
     pub items: Vec<ArtifactCandidate>,
 }
@@ -134,7 +134,7 @@ mod tests {
         for group in &groups {
             assert!(!group.items.is_empty());
             for item in &group.items {
-                assert!(["terminal", "file", "ai_agent", "window"].contains(&item.kind.as_str()));
+                assert!(["file", "ai_agent", "window"].contains(&item.kind.as_str()));
             }
         }
     }

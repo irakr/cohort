@@ -268,8 +268,8 @@ async fn catalog_and_ssh_key_flow() {
 
     // Owner publishes what their engine sees; responders read it.
     let catalog = json!({ "items": [
-        { "id": "t-ttys004", "kind": "terminal", "label": "Terminal (ttys004)",
-          "detail": "/work/payments", "pid": 4210 },
+        { "id": "w-4410", "kind": "window", "label": "Google Chrome",
+          "detail": "Grafana - payments", "pid": null },
         { "id": "a-claude", "kind": "ai_agent", "label": "Claude Code",
           "detail": "agent session active", "pid": 3229 }
     ]});
@@ -403,7 +403,7 @@ async fn create_assist_persists_artifacts_and_tags() {
         "insights": "",
         "environment": ["Node 20", "webpack 5"],
         "artifacts": [
-            { "id": "t1", "kind": "terminal", "label": "iTerm2", "detail": "npm run build",
+            { "id": "a1", "kind": "ai_agent", "label": "Claude Code", "detail": "agent session active",
               "icon": "data:image/png;base64,AAA", "pid": 4211 },
             { "id": "f1", "kind": "file", "label": "webpack.config.js", "detail": "repo root" }
         ]
@@ -414,9 +414,9 @@ async fn create_assist_persists_artifacts_and_tags() {
     let artifacts = v["artifacts"].as_array().unwrap();
     assert_eq!(artifacts.len(), 2);
     // Icon and pid persist for the Shared Artifacts list; absent stays null.
-    let terminal = artifacts.iter().find(|a| a["id"] == "t1").unwrap();
-    assert_eq!(terminal["icon"], "data:image/png;base64,AAA");
-    assert_eq!(terminal["pid"], 4211);
+    let agent = artifacts.iter().find(|a| a["id"] == "a1").unwrap();
+    assert_eq!(agent["icon"], "data:image/png;base64,AAA");
+    assert_eq!(agent["pid"], 4211);
     let file = artifacts.iter().find(|a| a["id"] == "f1").unwrap();
     assert!(file["icon"].is_null());
     assert!(file["pid"].is_null());
@@ -494,8 +494,6 @@ async fn owner_uploads_live_data_snapshot() {
     let snapshot = json!({
         "file_tree": [{ "name": "app.yaml", "path": "/work/app.yaml", "children": [] }],
         "files": { "/work/app.yaml": "replicas: 3" },
-        "terminal_tabs": [],
-        "terminal_feed": [],
         "agent_chat": []
     });
     // Only the owner may upload.
@@ -512,7 +510,7 @@ async fn owner_uploads_live_data_snapshot() {
 
     // Replace semantics: a second upload fully supersedes the first.
     let (_, _) = call(&app, "POST", &format!("/api/assists/{ref_}/artifacts"), Some("u-meera"), Some(json!({
-        "file_tree": [], "files": {}, "terminal_tabs": [], "terminal_feed": [], "agent_chat": []
+        "file_tree": [], "files": {}, "agent_chat": []
     }))).await;
     let (_, v) = call(&app, "GET", &format!("/api/assists/{ref_}/artifacts"), Some("u-meera"), None).await;
     assert_eq!(v["files"].as_object().unwrap().len(), 0);
@@ -521,7 +519,7 @@ async fn owner_uploads_live_data_snapshot() {
     call(&app, "POST", &format!("/api/assists/{ref_}/close"), Some("u-meera"),
         Some(json!({ "outcome": "resolved", "credited_user_ids": [], "record": {} }))).await;
     let (status, _) = call(&app, "POST", &format!("/api/assists/{ref_}/artifacts"), Some("u-meera"), Some(json!({
-        "file_tree": [], "files": {}, "terminal_tabs": [], "terminal_feed": [], "agent_chat": []
+        "file_tree": [], "files": {}, "agent_chat": []
     }))).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
@@ -536,7 +534,6 @@ async fn live_data_requires_membership() {
     let (status, v) = call(&app, "GET", "/api/assists/S-2411/artifacts", Some("u-priya"), None).await;
     assert_eq!(status, StatusCode::OK);
     assert!(v["files"].as_object().unwrap().contains_key("k8s/payments/deployment.yaml"));
-    assert!(!v["terminal_feed"].as_array().unwrap().is_empty());
 }
 
 // ---- Insights drafting fallback ----
@@ -548,7 +545,7 @@ async fn draft_brief_without_api_key_invents_nothing() {
         "title": "Rollout stuck on image pull",
         "description": "The pod never becomes ready.",
         "artifacts": [
-            { "id": "t1", "kind": "terminal", "label": "iTerm2 (payments)", "detail": "kubectl" },
+            { "id": "a1", "kind": "ai_agent", "label": "Claude Code", "detail": "running - /work/payments" },
             { "id": "f1", "kind": "file", "label": "deployment.yaml", "detail": "k8s/payments - ref a3f9c1" }
         ]
     });

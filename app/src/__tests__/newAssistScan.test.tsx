@@ -6,24 +6,9 @@ import { NewAssist } from "../screens/NewAssist";
 import { mockHubFetch } from "./fixtures";
 
 // Simulate what the agent module's live scan reports on a machine with one
-// terminal session and its working directory.
+// working directory and one running AI agent session.
 vi.mock("../api/agent", () => ({
   suggestArtifacts: vi.fn(async () => [
-    {
-      title: "Terminals",
-      items: [
-        {
-          id: "t-ttys001",
-          kind: "terminal",
-          badge: "iT",
-          label: "iTerm2 (ttys001)",
-          detail: "/work/payments",
-          warn: false,
-          icon: "data:image/png;base64,QUJD",
-          pid: 4211,
-        },
-      ],
-    },
     {
       title: "Files",
       items: [
@@ -36,6 +21,21 @@ vi.mock("../api/agent", () => ({
           warn: false,
           icon: null,
           pid: null,
+        },
+      ],
+    },
+    {
+      title: "AI agents",
+      items: [
+        {
+          id: "a-claude-4211",
+          kind: "ai_agent",
+          badge: "CC",
+          label: "Claude Code",
+          detail: "running - /work/payments",
+          warn: false,
+          icon: "data:image/png;base64,QUJD",
+          pid: 4211,
         },
       ],
     },
@@ -58,30 +58,30 @@ describe("New assist picker with a live scan", () => {
     const { container } = renderScreen();
     await userEvent.click(screen.getByRole("button", { name: /Add artifacts/ }));
 
-    // Terminals tab is active by default and lists the scanned session
-    // with its real app icon.
-    await waitFor(() => expect(screen.getByText("iTerm2 (ttys001)")).toBeTruthy());
-    expect(container.querySelectorAll('img[src^="data:image/png;base64,"]').length).toBe(1);
-
-    // Files tab lists the scanned working directory as a suggested path.
-    await userEvent.click(screen.getByRole("button", { name: /Files & Directories/ }));
-    expect(screen.getByText("payments")).toBeTruthy();
+    // Files tab is active by default and lists the scanned working
+    // directory as a suggested path.
+    await waitFor(() => expect(screen.getByText("payments")).toBeTruthy());
     expect(screen.getByText("Suggested")).toBeTruthy();
+
+    // AI agents tab lists the running session with its real app icon.
+    await userEvent.click(screen.getByRole("button", { name: /AI agents/ }));
+    expect(screen.getByText("Claude Code")).toBeTruthy();
+    expect(container.querySelectorAll('img[src^="data:image/png;base64,"]').length).toBe(1);
   });
 
   it("selecting in the dialog updates the page's artifact list", async () => {
     mockHubFetch();
     const { container } = renderScreen();
     await userEvent.click(screen.getByRole("button", { name: /Add artifacts/ }));
-    await waitFor(() => expect(screen.getByText("iTerm2 (ttys001)")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("payments")).toBeTruthy());
 
-    await userEvent.click(screen.getByText("iTerm2 (ttys001)"));
+    await userEvent.click(screen.getByText("payments"));
     expect(screen.getByText(/1 selected for analysis/)).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Done" }));
 
     await waitFor(() => {
       expect(container.textContent).toContain("Artifacts - 1 selected");
-      expect(screen.getByText("iTerm2 (ttys001)")).toBeTruthy();
+      expect(screen.getByText("payments")).toBeTruthy();
     });
   });
 });

@@ -12,7 +12,6 @@ import {
   Plus,
   Radio,
   Send,
-  SquareTerminal,
   Trash2,
   TerminalSquare,
   User as UserIcon,
@@ -27,9 +26,8 @@ import {
   sshPublicKey,
   sshTargetSuggestion,
   suggestArtifacts,
-  terminalActivity,
 } from "../../api/agent";
-import { apiDelete, apiGet, apiGetBlob, apiPost, apiPutBytes } from "../../api/client";
+import { apiDelete, apiGetBlob, apiPost, apiPutBytes } from "../../api/client";
 import { useApi } from "../../api/hooks";
 import type {
   AssistArtifact,
@@ -40,7 +38,6 @@ import type {
   ScopeRequest,
 } from "../../api/types";
 import { FileTree } from "../../components/FileTree";
-import { TerminalPane } from "../../components/TerminalPane";
 import {
   AvatarChip,
   ConfirmDialog,
@@ -76,8 +73,8 @@ export function AssistDetail({ assistRef }: { assistRef: string }) {
     refetch,
   } = useApi<AssistDetailT>(`/api/assists/${assistRef}`, { pollMs: 5000 });
   const isMember = !!assist && (assist.viewer_is_owner || assist.viewer_is_responder);
-  // Polled so snapshot and terminal-activity updates from the owner's
-  // engine reach responders without re-entering the screen.
+  // Polled so snapshot updates from the owner's engine reach responders
+  // without re-entering the screen.
   const { data: liveData } = useApi<LiveData>(
     isMember ? `/api/assists/${assistRef}/artifacts` : null,
     { pollMs: 5000 },
@@ -91,17 +88,9 @@ export function AssistDetail({ assistRef }: { assistRef: string }) {
   const [notice, setNotice] = useState<string | null>(null);
 
   // While the owner has an open assist on screen, their engine's current
-  // scan (terminals, agents, suggested paths) is published to the hub so
-  // the responder's request wizard can offer real options. Terminals with an
-  // active grant additionally get their live process activity published as
-  // the terminal feed (real PTY streaming arrives with the detector).
+  // scan (agents, windows, suggested paths) is published to the hub so
+  // the responder's request wizard can offer real options.
   const isOwnerOpen = !!assist && assist.viewer_is_owner && assist.status !== "done";
-  const grantedTerminalsRef = useRef<string[]>([]);
-  grantedTerminalsRef.current = assist
-    ? assist.grants
-        .filter((g) => g.kind === "terminal" && g.target !== null)
-        .map((g) => g.target as string)
-    : [];
   useEffect(() => {
     if (!isOwnerOpen) {
       return;
@@ -127,26 +116,6 @@ export function AssistDetail({ assistRef }: { assistRef: string }) {
         await apiPost(`/api/assists/${assistRef}/catalog`, { items });
       } catch (e) {
         console.error("catalog publish failed:", e);
-      }
-
-      const granted = grantedTerminalsRef.current;
-      if (granted.length === 0) {
-        return;
-      }
-      const feed = await terminalActivity(granted);
-      if (!feed || cancelled) {
-        return;
-      }
-      try {
-        // Merge onto the freshest live data so file snapshots survive.
-        const current = await apiGet<LiveData>(`/api/assists/${assistRef}/artifacts`);
-        await apiPost(`/api/assists/${assistRef}/artifacts`, {
-          ...current,
-          terminal_tabs: granted,
-          terminal_feed: feed,
-        });
-      } catch (e) {
-        console.error("terminal activity publish failed:", e);
       }
     };
     void publish();
@@ -281,8 +250,6 @@ export function AssistDetail({ assistRef }: { assistRef: string }) {
           await apiPost(`/api/assists/${assist.ref}/artifacts`, {
             file_tree: snap.file_tree,
             files: snap.files,
-            terminal_tabs: liveData?.terminal_tabs ?? [],
-            terminal_feed: liveData?.terminal_feed ?? [],
             agent_chat: liveData?.agent_chat ?? [],
           });
         } catch (e) {
@@ -570,13 +537,11 @@ function SharedArtifactIcon({ artifact }: { artifact: AssistArtifact }) {
     );
   }
   const Glyph =
-    artifact.kind === "terminal"
-      ? SquareTerminal
-      : artifact.kind === "ai_agent"
-        ? Bot
-        : artifact.label.includes(".")
-          ? FileText
-          : Folder;
+    artifact.kind === "ai_agent"
+      ? Bot
+      : artifact.label.includes(".")
+        ? FileText
+        : Folder;
   return (
     <IconTile size={30} bg="var(--color-neutral-200)" fg="var(--color-neutral-700)">
       <Glyph size={15} />
@@ -763,7 +728,6 @@ const KIND_ICON: Record<ScopeKind, typeof FileText> = {
   comment: MessageCircle,
   live_debug: Radio,
   file: FileText,
-  terminal: SquareTerminal,
   agents: Bot,
   ssh: TerminalSquare,
   window: AppWindow,
@@ -971,8 +935,8 @@ function ResponderPanel({
         ) : (
           <>
             <p style={{ margin: "0 0 12px", fontSize: 13.5, color: "var(--color-neutral-600)" }}>
-              Ask {assist.owner_name} to open a live, bounded view: granted files, a read-only
-              terminal stream, and more on request.
+              Ask {assist.owner_name} to open a live, bounded view: granted files,
+              application windows, and more on request.
             </p>
             <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
               <input
@@ -1042,41 +1006,13 @@ function ResponderPanel({
         <div className="card" style={{ gridColumn: "span 2", padding: 12 }}>
           <SectionTitle>Files and directories</SectionTitle>
           {liveData ? (
-            // Height-capped and scrollable so deep trees never stretch the
-            // grid; matches the terminal pane's height.
+            // Height-capped and scrollable so deep trees never stretch
+            // the grid.
             <div style={{ maxHeight: 300, overflow: "auto" }}>
               <FileTree nodes={liveData.file_tree} onOpenFile={onOpenFile} />
             </div>
           ) : (
             <Spinner size={14} />
-          )}
-        </div>
-
-        <div style={{ gridColumn: "span 4" }}>
-          {liveData && liveData.terminal_feed.length > 0 ? (
-            <TerminalPane
-              tabs={liveData.terminal_tabs.length > 0 ? liveData.terminal_tabs : ["terminal"]}
-              feed={liveData.terminal_feed}
-            />
-          ) : (
-            <div className="card" style={{ padding: 16 }}>
-              <SectionTitle>Terminal view</SectionTitle>
-              <p style={{ fontSize: 12.5, color: "var(--color-neutral-500)", margin: 0 }}>
-                {grantFor("terminal") ? (
-                  <>
-                    <Spinner size={12} /> Terminal granted - waiting for{" "}
-                    {assist.owner_name}'s engine to publish activity (it
-                    updates while they view this assist).
-                  </>
-                ) : (
-                  <>
-                    No terminal granted yet - use "Request artifacts" to ask
-                    for one. The view shows live process activity; full
-                    output streaming arrives with the detector.
-                  </>
-                )}
-              </p>
-            </div>
           )}
         </div>
 
@@ -1260,17 +1196,15 @@ function ReqIcon({ row }: { row: ReqRow }) {
     );
   }
   const Glyph =
-    row.kind === "terminal"
-      ? SquareTerminal
-      : row.kind === "agents"
-        ? Bot
-        : row.kind === "window"
-          ? AppWindow
-          : row.kind === "ssh"
-            ? TerminalSquare
-            : row.label.includes(".")
-              ? FileText
-              : Folder;
+    row.kind === "agents"
+      ? Bot
+      : row.kind === "window"
+        ? AppWindow
+        : row.kind === "ssh"
+          ? TerminalSquare
+          : row.label.includes(".")
+            ? FileText
+            : Folder;
   const color =
     row.kind === "file" && !row.label.includes(".")
       ? "#64a8e8"
@@ -1383,19 +1317,6 @@ function RequestArtifactsModal({
           })),
         },
       ],
-    },
-    {
-      id: "term",
-      name: "Terminals",
-      icon: SquareTerminal,
-      desc: "View a session as a read-only stream. You see output, never type.",
-      subs: [
-        {
-          name: "Active sessions",
-          rows: catalogFor("terminal").map((i) => catalogRow(i, "terminal", i.label)),
-        },
-      ],
-      note: `No terminals are running on ${assist.owner_name}'s machine right now.`,
     },
     {
       id: "agents",

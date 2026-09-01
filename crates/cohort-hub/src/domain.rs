@@ -55,7 +55,6 @@ pub enum ScopeKind {
     Comment,
     LiveDebug,
     File,
-    Terminal,
     Agents,
     Ssh,
     /// Application window mirroring (view-only pixel stream, see the
@@ -79,7 +78,7 @@ pub enum ScopeStatus {
 #[cfg_attr(feature = "ts-export", ts(export))]
 pub struct AssistArtifact {
     pub id: String,
-    /// "terminal" | "file" | "ai_agent" | "custom"
+    /// "file" | "ai_agent" | "custom"
     pub kind: String,
     pub label: String,
     pub detail: String,
@@ -220,7 +219,7 @@ pub struct DecideScopeRequest {
 }
 
 /// Owner-published snapshot of what their engine currently sees (running
-/// terminals and agents, suggested paths), for the responder's request wizard.
+/// agents and windows, suggested paths), for the responder's request wizard.
 #[derive(Debug, Clone, Deserialize, TS)]
 #[cfg_attr(feature = "ts-export", ts(export))]
 pub struct CatalogUpload {
@@ -408,10 +407,6 @@ pub struct LiveData {
     pub file_tree: Vec<FileNode>,
     #[serde(default)]
     pub files: HashMap<String, String>,
-    #[serde(default)]
-    pub terminal_tabs: Vec<String>,
-    #[serde(default)]
-    pub terminal_feed: Vec<String>,
     #[serde(default)]
     pub agent_chat: Vec<ChatMsg>,
 }

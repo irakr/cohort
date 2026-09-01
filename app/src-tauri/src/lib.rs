@@ -21,14 +21,6 @@ fn env_fingerprint() -> Vec<String> {
     LocalAgent.env_fingerprint()
 }
 
-/// Owner side: what is running in the granted terminals right now (process
-/// list per tty). Published to the hub while the assist is open; real PTY
-/// streaming arrives with the detector.
-#[tauri::command]
-fn terminal_activity(labels: Vec<String>) -> Vec<String> {
-    cohort_agent::scan::terminal_activity(&labels)
-}
-
 /// Owner side: capture one JPEG frame of a granted window, returned as
 /// base64 (raw byte arrays are wasteful across the IPC boundary).
 #[tauri::command]
@@ -116,7 +108,6 @@ pub fn run() {
             suggest_artifacts,
             env_fingerprint,
             snapshot_artifacts,
-            terminal_activity,
             capture_window,
             ssh_public_key,
             ssh_target_suggestion,

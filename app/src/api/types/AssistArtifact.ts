@@ -5,7 +5,7 @@
  */
 export type AssistArtifact = { id: string, 
 /**
- * "terminal" | "file" | "ai_agent" | "custom"
+ * "file" | "ai_agent" | "custom"
  */
 kind: string, label: string, detail: string, 
 /**

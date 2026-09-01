@@ -3,6 +3,6 @@ import type { AssistArtifact } from "./AssistArtifact";
 
 /**
  * Owner-published snapshot of what their engine currently sees (running
- * terminals and agents, suggested paths), for the responder's request wizard.
+ * agents and windows, suggested paths), for the responder's request wizard.
  */
 export type CatalogUpload = { items: Array<AssistArtifact>, };

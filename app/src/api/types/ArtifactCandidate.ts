@@ -6,7 +6,7 @@ export type ArtifactCandidate = {
  */
 id: string, 
 /**
- * Picker kind: "terminal" | "file" | "ai_agent" | "custom".
+ * Picker kind: "file" | "ai_agent" | "window" | "custom".
  */
 kind: string, 
 /**

@@ -9,7 +9,6 @@ vi.mock("../api/agent", () => ({
   suggestArtifacts: vi.fn(async () => []),
   envFingerprint: vi.fn(async () => []),
   snapshotPaths: vi.fn(async () => null),
-  terminalActivity: vi.fn(async () => null),
   sshPublicKey: vi.fn(async () => null),
   sshTargetSuggestion: vi.fn(async () => ""),
   installSshKey: vi.fn(async () => false),

@@ -2,4 +2,4 @@
 import type { ChatMsg } from "./ChatMsg";
 import type { FileNode } from "./FileNode";
 
-export type LiveData = { file_tree: Array<FileNode>, files: { [key in string]: string }, terminal_tabs: Array<string>, terminal_feed: Array<string>, agent_chat: Array<ChatMsg>, };
+export type LiveData = { file_tree: Array<FileNode>, files: { [key in string]: string }, agent_chat: Array<ChatMsg>, };

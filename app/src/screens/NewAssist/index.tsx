@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Bot, Check, FileText, Folder, Plus, SquareTerminal, X } from "lucide-react";
+import { AlertTriangle, Bot, Check, FileText, Folder, Plus, X } from "lucide-react";
 import { envFingerprint, snapshotPaths, suggestArtifacts } from "../../api/agent";
 import { apiPost } from "../../api/client";
 import type {
@@ -15,9 +15,6 @@ import { CATEGORY_LABELS } from "../../util";
 import { useNav } from "../../app/router";
 
 function glyphFor(item: ArtifactCandidate): { Glyph: typeof FileText; color: string } {
-  if (item.kind === "terminal") {
-    return { Glyph: SquareTerminal, color: "var(--color-neutral-600)" };
-  }
   if (item.kind === "ai_agent") {
     return { Glyph: Bot, color: item.badge === "CC" ? "#d97757" : "var(--color-neutral-600)" };
   }
@@ -75,14 +72,6 @@ function buildCategories(
   const isActive = (a: ArtifactCandidate) =>
     a.detail.includes("active") || a.detail.startsWith("running");
   return [
-    {
-      id: "term",
-      name: "Terminals",
-      icon: SquareTerminal,
-      desc: "Selected terminal sessions will be read by the Cohort agent to analyze what you require.",
-      subs: [{ name: "Detected sessions", items: itemsOf("Terminals") }],
-      note: "No terminal sessions detected right now.",
-    },
     {
       id: "files",
       name: "Files & Directories",
@@ -201,8 +190,6 @@ export function NewAssist() {
             await apiPost(`/api/assists/${detail.ref}/artifacts`, {
               file_tree: snap.file_tree,
               files: snap.files,
-              terminal_tabs: [],
-              terminal_feed: [],
               agent_chat: [],
             });
           } catch (e) {
@@ -468,7 +455,7 @@ export function NewAssist() {
                 color: "var(--color-neutral-600)",
               }}
             >
-              No artifacts yet. Add terminals, files, agents or app windows for Cohort to analyze.
+              No artifacts yet. Add files, agents or app windows for Cohort to analyze.
             </div>
           )}
         </div>
