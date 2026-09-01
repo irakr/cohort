@@ -17,6 +17,7 @@ use ts_rs::TS;
 
 pub mod icons;
 pub mod scan;
+pub mod snapshot;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[cfg_attr(feature = "ts-export", ts(export))]

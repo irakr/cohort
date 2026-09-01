@@ -84,6 +84,34 @@ pub async fn list(
         });
     }
 
+    // Comments on assists the viewer responds to (e.g. the owner replying).
+    let rows = sqlx::query(
+        "SELECT s.id, s.reason, s.created_at, s.assist_ref, a.title, u.name AS requester_name
+         FROM scope_requests s
+         JOIN assists a ON a.ref = s.assist_ref
+         JOIN responders r ON r.assist_ref = s.assist_ref AND r.user_id = ?
+         JOIN users u ON u.id = s.requester_id
+         WHERE s.kind = 'comment' AND s.requester_id != ? AND s.created_at >= ?",
+    )
+    .bind(&viewer.id)
+    .bind(&viewer.id)
+    .bind(&since)
+    .fetch_all(&state.pool)
+    .await?;
+    for r in rows {
+        let requester: String = r.get("requester_name");
+        let reason: String = r.get("reason");
+        notifications.push(HubNotification {
+            id: format!("req-{}-created", r.get::<i64, _>("id")),
+            kind: "comment".into(),
+            assist_ref: r.get("assist_ref"),
+            assist_title: r.get("title"),
+            actor_name: requester.clone(),
+            message: format!("{requester} commented: {reason}"),
+            at: r.get("created_at"),
+        });
+    }
+
     // Decisions on requests the viewer made (comments auto-approve; skip them).
     let rows = sqlx::query(
         "SELECT s.id, s.kind, s.target, s.status, s.decided_at, s.assist_ref,

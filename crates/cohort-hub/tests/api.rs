@@ -316,6 +316,52 @@ async fn join_rules() {
 }
 
 #[tokio::test]
+async fn owner_uploads_live_data_snapshot() {
+    let app = app().await;
+    // Create a fresh assist as Meera: no live data yet.
+    let (_, created) = call(&app, "POST", "/api/assists", Some("u-meera"), Some(json!({
+        "title": "Fresh assist with a real snapshot"
+    }))).await;
+    let ref_ = created["ref"].as_str().unwrap().to_string();
+    let (_, empty) = call(&app, "GET", &format!("/api/assists/{ref_}/artifacts"), Some("u-meera"), None).await;
+    assert_eq!(empty["files"].as_object().unwrap().len(), 0);
+
+    let snapshot = json!({
+        "file_tree": [{ "name": "app.yaml", "path": "/work/app.yaml", "children": [] }],
+        "files": { "/work/app.yaml": "replicas: 3" },
+        "terminal_tabs": [],
+        "terminal_feed": [],
+        "agent_chat": []
+    });
+    // Only the owner may upload.
+    let (status, _) = call(&app, "POST", &format!("/api/assists/{ref_}/artifacts"), Some("u-priya"), Some(snapshot.clone())).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = call(&app, "POST", &format!("/api/assists/{ref_}/artifacts"), Some("u-meera"), Some(snapshot)).await;
+    assert_eq!(status, StatusCode::OK);
+
+    // A responder now sees the snapshot.
+    call(&app, "POST", &format!("/api/assists/{ref_}/responders"), Some("u-priya"), None).await;
+    let (_, v) = call(&app, "GET", &format!("/api/assists/{ref_}/artifacts"), Some("u-priya"), None).await;
+    assert_eq!(v["files"]["/work/app.yaml"], "replicas: 3");
+    assert_eq!(v["file_tree"][0]["name"], "app.yaml");
+
+    // Replace semantics: a second upload fully supersedes the first.
+    let (_, _) = call(&app, "POST", &format!("/api/assists/{ref_}/artifacts"), Some("u-meera"), Some(json!({
+        "file_tree": [], "files": {}, "terminal_tabs": [], "terminal_feed": [], "agent_chat": []
+    }))).await;
+    let (_, v) = call(&app, "GET", &format!("/api/assists/{ref_}/artifacts"), Some("u-meera"), None).await;
+    assert_eq!(v["files"].as_object().unwrap().len(), 0);
+
+    // Closed assists reject uploads.
+    call(&app, "POST", &format!("/api/assists/{ref_}/close"), Some("u-meera"),
+        Some(json!({ "outcome": "resolved", "credited_user_ids": [], "record": {} }))).await;
+    let (status, _) = call(&app, "POST", &format!("/api/assists/{ref_}/artifacts"), Some("u-meera"), Some(json!({
+        "file_tree": [], "files": {}, "terminal_tabs": [], "terminal_feed": [], "agent_chat": []
+    }))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn live_data_requires_membership() {
     let app = app().await;
     let (status, _) = call(&app, "GET", "/api/assists/S-2411/artifacts", Some("u-priya"), None).await;
@@ -469,6 +515,49 @@ async fn notifications_cover_request_decision_join_and_credit() {
     )
     .await;
     assert!(v["notifications"].as_array().unwrap().iter().any(|n| n["kind"] == "credited"));
+}
+
+#[tokio::test]
+async fn conversation_flows_both_ways() {
+    let app = app().await;
+    let (_, boot) = call(&app, "GET", "/api/notifications", Some("u-priya"), None).await;
+    let priya_cursor = boot["now"].as_str().unwrap().to_string();
+
+    // The owner comments on their own assist.
+    let (status, comment) = call(
+        &app, "POST", "/api/assists/S-2409/scope-requests", Some("u-alex"),
+        Some(json!({ "kind": "comment", "reason": "pushed a branch with the pool bumped to 4" })),
+    ).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(comment["status"], "approved"); // comments auto-approve
+
+    // A non-member cannot comment; the owner cannot request scopes.
+    let (status, _) = call(
+        &app, "POST", "/api/assists/S-2409/scope-requests", Some("u-devansh"),
+        Some(json!({ "kind": "comment", "reason": "drive-by" })),
+    ).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = call(
+        &app, "POST", "/api/assists/S-2409/scope-requests", Some("u-alex"),
+        Some(json!({ "kind": "file", "target": "src/db.rs", "reason": "why not" })),
+    ).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // Responders are notified of the owner's comment; the owner is not
+    // notified of their own.
+    settle().await;
+    let (_, v) = call(
+        &app, "GET", &format!("/api/notifications?since={priya_cursor}"), Some("u-priya"), None,
+    ).await;
+    let comments: Vec<&serde_json::Value> = v["notifications"]
+        .as_array().unwrap().iter().filter(|n| n["kind"] == "comment").collect();
+    assert_eq!(comments.len(), 1);
+    assert!(comments[0]["message"].as_str().unwrap().contains("pool bumped to 4"));
+
+    let (_, v) = call(
+        &app, "GET", &format!("/api/notifications?since={priya_cursor}"), Some("u-alex"), None,
+    ).await;
+    assert!(v["notifications"].as_array().unwrap().iter().all(|n| n["kind"] != "comment"));
 }
 
 #[tokio::test]

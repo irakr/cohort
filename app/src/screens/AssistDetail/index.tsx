@@ -10,12 +10,14 @@ import {
   Lock,
   MessageCircle,
   Radio,
+  Send,
   SquareTerminal,
   TerminalSquare,
   User as UserIcon,
   Users,
   X,
 } from "lucide-react";
+import { snapshotPaths } from "../../api/agent";
 import { apiPost } from "../../api/client";
 import { useApi } from "../../api/hooks";
 import type {
@@ -28,7 +30,7 @@ import type {
 } from "../../api/types";
 import { FileTree } from "../../components/FileTree";
 import { TerminalPane } from "../../components/TerminalPane";
-import { IconTile, Modal, SectionTitle, Spinner, StatusPill } from "../../components/ui";
+import { AvatarChip, IconTile, Modal, SectionTitle, Spinner, StatusPill } from "../../components/ui";
 import { CATEGORY_LABELS, renderMarkdown, timeAgo } from "../../util";
 import { useNav } from "../../app/router";
 import { getCurrentUserId } from "../../api/currentUser";
@@ -87,6 +89,39 @@ export function AssistDetail({ assistRef }: { assistRef: string }) {
     }
   }
 
+  // Owner approval. Approving a file grant re-snapshots every shared and
+  // granted path locally and uploads the full snapshot, so the responder's
+  // tree gains the new path within a poll.
+  async function approveRequest(r: ScopeRequest) {
+    await act(async () => {
+      await apiPost(`/api/scope-requests/${r.id}/approve`);
+      if (r.kind !== "file" || !assist) {
+        return;
+      }
+      const paths = [
+        ...assist.artifacts.filter((a) => a.kind === "file").map((a) => a.detail),
+        ...assist.scope_requests
+          .filter((s) => s.kind === "file" && s.status === "approved" && s.target)
+          .map((s) => s.target as string),
+        ...(r.target ? [r.target] : []),
+      ];
+      const snap = await snapshotPaths(paths);
+      if (snap) {
+        try {
+          await apiPost(`/api/assists/${assist.ref}/artifacts`, {
+            file_tree: snap.file_tree,
+            files: snap.files,
+            terminal_tabs: liveData?.terminal_tabs ?? [],
+            terminal_feed: liveData?.terminal_feed ?? [],
+            agent_chat: liveData?.agent_chat ?? [],
+          });
+        } catch (e) {
+          console.error("live data upload failed:", e);
+        }
+      }
+    });
+  }
+
   return (
     <div style={{ maxWidth: assist.viewer_is_responder && isLive ? 1200 : 860, margin: "0 auto", padding: "30px 28px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
@@ -141,7 +176,13 @@ export function AssistDetail({ assistRef }: { assistRef: string }) {
       <Brief assist={assist} />
 
       {assist.viewer_is_owner && assist.status !== "done" && (
-        <OwnerPanel assist={assist} busy={busy} act={act} onClose={() => navigate({ name: "close", ref: assist.ref })} />
+        <OwnerPanel
+          assist={assist}
+          busy={busy}
+          act={act}
+          onApprove={approveRequest}
+          onClose={() => navigate({ name: "close", ref: assist.ref })}
+        />
       )}
 
       {!assist.viewer_is_owner && assist.status !== "done" && (
@@ -163,6 +204,8 @@ export function AssistDetail({ assistRef }: { assistRef: string }) {
           This assist is closed. Its resolution record is kept indefinitely.
         </div>
       )}
+
+      <Conversation assist={assist} busy={busy} act={act} />
 
       {viewFile && liveData && (
         <Modal width={660} onClose={() => setViewFile(null)}>
@@ -321,6 +364,98 @@ function Brief({ assist }: { assist: AssistDetailT }) {
   );
 }
 
+// Comments live in scope_requests (kind "comment", auto-approved); this is
+// the conversation between the owner and responders.
+function Conversation({
+  assist,
+  busy,
+  act,
+}: {
+  assist: AssistDetailT;
+  busy: boolean;
+  act: (fn: () => Promise<unknown>) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState("");
+  const comments = assist.scope_requests.filter((r) => r.kind === "comment");
+  const canPost =
+    (assist.viewer_is_owner || assist.viewer_is_responder) && assist.status !== "done";
+
+  async function send() {
+    const text = draft.trim();
+    if (text === "") {
+      return;
+    }
+    await act(async () => {
+      await apiPost(`/api/assists/${assist.ref}/scope-requests`, {
+        kind: "comment",
+        target: null,
+        reason: text,
+        ttl_minutes: null,
+      });
+      setDraft("");
+    });
+  }
+
+  return (
+    <section style={{ marginTop: 24 }}>
+      <SectionTitle>Conversation</SectionTitle>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {comments.length === 0 && (
+          <p style={{ fontSize: 13, color: "var(--color-neutral-500)", margin: 0 }}>
+            No comments yet.
+          </p>
+        )}
+        {comments.map((c) => (
+          <div key={c.id} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+            <AvatarChip name={c.requester_name} size={26} active={c.requester_id === assist.owner_id} />
+            <div className="card" style={{ padding: "8px 12px", flex: 1 }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "baseline", marginBottom: 2 }}>
+                <span style={{ fontSize: 12.5, fontWeight: 700 }}>{c.requester_name}</span>
+                {c.requester_id === assist.owner_id && (
+                  <span className="tag tag-accent" style={{ fontSize: 10 }}>
+                    owner
+                  </span>
+                )}
+                <span style={{ fontSize: 11, color: "var(--color-neutral-500)" }}>
+                  {timeAgo(c.created_at)} ago
+                </span>
+              </div>
+              <div style={{ fontSize: 13.5 }}>{c.reason}</div>
+            </div>
+          </div>
+        ))}
+        {canPost && (
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              className="input"
+              placeholder={
+                assist.viewer_is_owner
+                  ? "Reply to your responders"
+                  : `Comment for ${assist.owner_name}`
+              }
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  void send();
+                }
+              }}
+            />
+            <button
+              className="btn btn-primary"
+              title="Send comment"
+              disabled={busy || draft.trim() === ""}
+              onClick={() => void send()}
+            >
+              <Send size={14} />
+            </button>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 const KIND_ICON: Record<ScopeKind, typeof FileText> = {
   comment: MessageCircle,
   live_debug: Radio,
@@ -344,45 +479,42 @@ function OwnerPanel({
   assist,
   busy,
   act,
+  onApprove,
   onClose,
 }: {
   assist: AssistDetailT;
   busy: boolean;
   act: (fn: () => Promise<unknown>) => Promise<void>;
+  onApprove: (r: ScopeRequest) => Promise<void>;
   onClose: () => void;
 }) {
+  // Comments live in the Conversation section; this list is actionable only.
+  const requests = assist.scope_requests.filter((r) => r.kind !== "comment");
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <section>
         <SectionTitle>Responds</SectionTitle>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {assist.scope_requests.length === 0 && (
+          {requests.length === 0 && (
             <div className="card" style={{ padding: 16, fontSize: 13, color: "var(--color-neutral-600)" }}>
-              Nothing yet. Requests from responders land here for one-tap approval.
+              Nothing yet. Scope requests from responders land here for one-tap approval.
             </div>
           )}
-          {assist.scope_requests.map((r) => {
+          {requests.map((r) => {
             const Icon = KIND_ICON[r.kind];
-            const isComment = r.kind === "comment";
             return (
               <div
                 key={r.id}
                 className="card"
                 style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px" }}
               >
-                <IconTile
-                  size={26}
-                  bg={isComment ? "var(--color-neutral-100)" : "var(--color-accent-100)"}
-                  fg={isComment ? "var(--color-neutral-700)" : "var(--color-accent-700)"}
-                >
+                <IconTile size={26} bg="var(--color-accent-100)" fg="var(--color-accent-700)">
                   <Icon size={13} />
                 </IconTile>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: isComment ? 400 : 600 }}>
-                    {requestTitle(r)}
-                  </div>
+                  <div style={{ fontSize: 13.5, fontWeight: 600 }}>{requestTitle(r)}</div>
                   <div style={{ fontSize: 12, color: "var(--color-neutral-600)" }}>
-                    {isComment ? r.requester_name : `${r.requester_name}: "${r.reason}"`}
+                    {`${r.requester_name}: "${r.reason}"`}
                   </div>
                 </div>
                 {r.status === "pending" ? (
@@ -401,17 +533,15 @@ function OwnerPanel({
                       style={{ width: 32, height: 32, padding: 0 }}
                       title={r.kind === "live_debug" ? "Accept and go live" : "Approve for 4h"}
                       disabled={busy}
-                      onClick={() => void act(() => apiPost(`/api/scope-requests/${r.id}/approve`))}
+                      onClick={() => void onApprove(r)}
                     >
                       <Check size={14} />
                     </button>
                   </>
                 ) : (
-                  !isComment && (
-                    <span className={`tag ${r.status === "approved" ? "tag-accent" : "tag-neutral"}`}>
-                      {r.status === "approved" ? "granted for 4h" : "denied"}
-                    </span>
-                  )
+                  <span className={`tag ${r.status === "approved" ? "tag-accent" : "tag-neutral"}`}>
+                    {r.status === "approved" ? "granted for 4h" : "denied"}
+                  </span>
                 )}
               </div>
             );
@@ -592,11 +722,19 @@ function ResponderPanel({
         </div>
 
         <div style={{ gridColumn: "span 4" }}>
-          {liveData && (
+          {liveData && liveData.terminal_feed.length > 0 ? (
             <TerminalPane
               tabs={liveData.terminal_tabs.length > 0 ? liveData.terminal_tabs : ["terminal"]}
               feed={liveData.terminal_feed}
             />
+          ) : (
+            <div className="card" style={{ padding: 16 }}>
+              <SectionTitle>Terminal view</SectionTitle>
+              <p style={{ fontSize: 12.5, color: "var(--color-neutral-500)", margin: 0 }}>
+                No terminal stream shared on this assist. Real-time terminal
+                capture arrives with the detector.
+              </p>
+            </div>
           )}
         </div>
 

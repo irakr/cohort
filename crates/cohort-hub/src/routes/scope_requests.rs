@@ -7,8 +7,9 @@ use axum::http::HeaderMap;
 use axum::Json;
 use sqlx::Row;
 
-/// A responder asks for more context (or to go live). The stated reason is the
-/// value loop: it tells the owner what to look at and where.
+/// A responder asks for more context (or to go live), or either side posts a
+/// comment. The stated reason is the value loop: it tells the owner what to
+/// look at and where.
 pub async fn create(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -21,8 +22,23 @@ pub async fn create(
         return Err(AppError::BadRequest("this assist is closed".into()));
     }
     let responders = db::responders_for(&state.pool, &ref_).await?;
-    if !responders.iter().any(|u| u.id == viewer.id) {
-        return Err(AppError::Forbidden("join the assist before requesting scopes".into()));
+    let is_owner = row.owner_id == viewer.id;
+    let is_responder = responders.iter().any(|u| u.id == viewer.id);
+    if req.kind == ScopeKind::Comment {
+        // Conversation is open to both sides of the assist.
+        if !is_owner && !is_responder {
+            return Err(AppError::Forbidden("join the assist before commenting".into()));
+        }
+    } else {
+        // Scopes are requested by responders and granted by the owner.
+        if is_owner {
+            return Err(AppError::BadRequest(
+                "the owner grants scopes rather than requesting them".into(),
+            ));
+        }
+        if !is_responder {
+            return Err(AppError::Forbidden("join the assist before requesting scopes".into()));
+        }
     }
     if req.reason.trim().is_empty() {
         return Err(AppError::BadRequest("a reason is required".into()));

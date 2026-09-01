@@ -141,7 +141,33 @@ pub async fn join(
     Ok(Json(db::assist_detail(&state.pool, &ref_, &viewer).await?))
 }
 
-/// Seeded live data (file tree, file contents, terminal feed, agent chat).
+/// The owner's app uploads the current snapshot of shared paths (taken by
+/// the agent module at creation and on file-grant approval). Full replace:
+/// the upload always carries the complete current snapshot, so it is
+/// idempotent. Owner-only, open assists only.
+pub async fn set_live_data(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(ref_): Path<String>,
+    Json(data): Json<LiveData>,
+) -> Result<Json<LiveData>, AppError> {
+    let viewer = db::current_user(&state.pool, &headers).await?;
+    let row = db::assist_row(&state.pool, &ref_).await?;
+    if row.owner_id != viewer.id {
+        return Err(AppError::Forbidden("only the owner shares live data".into()));
+    }
+    if row.status == AssistStatus::Done {
+        return Err(AppError::BadRequest("this assist is closed".into()));
+    }
+    sqlx::query("UPDATE assists SET live_data = ? WHERE ref = ?")
+        .bind(serde_json::to_string(&data).map_err(|e| AppError::BadRequest(e.to_string()))?)
+        .bind(&ref_)
+        .execute(&state.pool)
+        .await?;
+    Ok(Json(data))
+}
+
+/// Live data (file tree, file contents, terminal feed, agent chat).
 /// The client gates each pane on the viewer's grants; when the owner agent
 /// module streams for real, enforcement moves server-side with it.
 pub async fn live_data(

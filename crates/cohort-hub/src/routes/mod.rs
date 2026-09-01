@@ -23,7 +23,10 @@ pub fn api_router() -> Router<AppState> {
         .route("/api/assists/draft-brief", post(draft_brief::draft))
         .route("/api/assists/{ref}", get(assists::detail))
         .route("/api/assists/{ref}/responders", post(assists::join))
-        .route("/api/assists/{ref}/artifacts", get(assists::live_data))
+        .route(
+            "/api/assists/{ref}/artifacts",
+            get(assists::live_data).post(assists::set_live_data),
+        )
         .route("/api/assists/{ref}/scope-requests", post(scope_requests::create))
         .route("/api/assists/{ref}/record-draft", get(assists::record_draft))
         .route("/api/assists/{ref}/close", post(assists::close))

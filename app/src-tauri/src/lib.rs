@@ -21,6 +21,20 @@ fn env_fingerprint() -> Vec<String> {
     LocalAgent.env_fingerprint()
 }
 
+/// Snapshot shared files/directories (bounded, redacted) for upload to the
+/// hub as the assist's live data. Runs only on explicit share or grant.
+#[tauri::command]
+fn snapshot_artifacts(paths: Vec<String>) -> cohort_agent::snapshot::PathSnapshot {
+    let snap = cohort_agent::snapshot::snapshot_paths(&paths);
+    log::info!(
+        "snapshot: {} path(s) -> {} file(s), {} note(s)",
+        paths.len(),
+        snap.files.len(),
+        snap.notes.len()
+    );
+    snap
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -48,7 +62,11 @@ pub fn run() {
             log::info!("cohort app started; logging to {}", log_dir.join("app.log").display());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![suggest_artifacts, env_fingerprint])
+        .invoke_handler(tauri::generate_handler![
+            suggest_artifacts,
+            env_fingerprint,
+            snapshot_artifacts
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

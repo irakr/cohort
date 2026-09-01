@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Bot, Check, ChevronLeft, FileText, Folder, SquareTerminal, X } from "lucide-react";
-import { envFingerprint, suggestArtifacts } from "../../api/agent";
+import { envFingerprint, snapshotPaths, suggestArtifacts } from "../../api/agent";
 import { apiPost } from "../../api/client";
 import type {
   ArtifactCandidate,
@@ -152,6 +152,27 @@ export function NewAssist() {
         environment,
         artifacts,
       });
+      // Upload a bounded, redacted snapshot of the shared files so the
+      // responder's live view has real content. Failures are logged, not
+      // fatal - the assist exists either way.
+      const filePaths = artifacts.filter((a) => a.kind === "file").map((a) => a.detail);
+      if (filePaths.length > 0) {
+        setAnalyzeStep("Capturing shared files...");
+        const snap = await snapshotPaths(filePaths);
+        if (snap) {
+          try {
+            await apiPost(`/api/assists/${detail.ref}/artifacts`, {
+              file_tree: snap.file_tree,
+              files: snap.files,
+              terminal_tabs: [],
+              terminal_feed: [],
+              agent_chat: [],
+            });
+          } catch (e) {
+            console.error("live data upload failed:", e);
+          }
+        }
+      }
       navigate({ name: "assist", ref: detail.ref });
     } catch (e) {
       setPhase("select");
