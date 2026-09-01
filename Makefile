@@ -1,10 +1,21 @@
 # Cohort dev tasks. The hub is a normal cargo binary; the app is a Tauri 2
 # desktop shell around the Vite frontend.
+#
+# Reproducible versions everywhere:
+# - rust-toolchain.toml pins the exact Rust toolchain (rustup honors it)
+# - Cargo.lock and app/package-lock.json pin every dependency; cargo runs
+#   with --locked and npm installs with `npm ci`, so a drifted lockfile
+#   fails loudly instead of silently updating
 
-.PHONY: dev-hub dev-app types test test-hub test-app db-reset
+.PHONY: setup dev-hub dev-app types test test-hub test-app db-reset
+
+# One-time per machine: install the pinned toolchain and exact npm deps.
+setup:
+	rustup show active-toolchain
+	cd app && npm ci
 
 dev-hub:
-	cargo run -p cohort-hub
+	cargo run --locked -p cohort-hub
 
 dev-app:
 	cd app && npx tauri dev
@@ -13,11 +24,11 @@ dev-app:
 # The ts-export feature gates ts-rs's generated export tests, so a plain
 # `cargo test` never writes TypeScript files.
 types:
-	TS_RS_EXPORT_DIR=../../app/src/api/types cargo test -p cohort-hub -p cohort-agent --features cohort-hub/ts-export,cohort-agent/ts-export export_bindings
+	TS_RS_EXPORT_DIR=../../app/src/api/types cargo test --locked -p cohort-hub -p cohort-agent --features cohort-hub/ts-export,cohort-agent/ts-export export_bindings
 	cd app/src/api/types && rm -f index.ts && (for f in *.ts; do echo "export type * from \"./$${f%.ts}\";"; done) > index.tmp && mv index.tmp index.ts
 
 test-hub:
-	cargo test -p cohort-hub -p cohort-agent
+	cargo test --locked -p cohort-hub -p cohort-agent -p cohort-dirs
 
 test-app:
 	cd app && npm test

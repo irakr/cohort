@@ -5,7 +5,7 @@ import type { SnapshotNode } from "./SnapshotNode";
  * Tree plus contents for the shared paths. Field names match the hub's
  * LiveData subset so the app can upload it directly.
  */
-export type PathSnapshot = { file_tree: Array<SnapshotNode>, files: { [key in string]?: string }, 
+export type PathSnapshot = { file_tree: Array<SnapshotNode>, files: { [key in string]: string }, 
 /**
  * Paths that were skipped or truncated, for the owner's information.
  */

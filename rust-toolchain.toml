@@ -1,0 +1,9 @@
+# Pins the Rust toolchain for every build of this repo. rustup reads this
+# automatically: any cargo/rustc invocation inside the repo uses exactly this
+# version, installing it first if missing. Upgrade deliberately, on all
+# machines at once, by editing this file and committing the resulting
+# Cargo.lock changes together.
+[toolchain]
+channel = "1.98.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

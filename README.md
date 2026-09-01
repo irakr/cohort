@@ -59,8 +59,6 @@ Debian/Ubuntu:
     sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \
       libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
 
-Note: `Cargo.lock` pins `notify-rust` to 4.11.7; newer versions require
-rustc 1.89+.
 
 Hub configuration (env):
 
@@ -82,6 +80,21 @@ Windows `%APPDATA%\cohort`), split into subdirectories:
 - `logs/hub.log` - the hub (also mirrored to stdout); override the
   directory with `COHORT_LOG_DIR` on servers
 - `config/cohort.db` - the hub's SQLite database when `COHORT_DB` is unset
+
+## Reproducible builds
+
+Versions are pinned so every machine builds the same thing:
+
+- `rust-toolchain.toml` pins the exact Rust toolchain; rustup installs and
+  uses it automatically inside the repo. The hub Dockerfile's base image
+  tag must match it.
+- `Cargo.lock` and `app/package-lock.json` pin every dependency. Makefile
+  cargo targets run with `--locked` and `make setup` installs npm deps with
+  `npm ci`, so lockfile drift fails loudly instead of updating silently.
+- Upgrade deliberately: bump `rust-toolchain.toml` (and the Dockerfile tag)
+  on all machines at once, and commit lockfile changes with the bump.
+
+New machine bootstrap: install rustup and Node 20+, then `make setup`.
 
 ## Tests and types
 

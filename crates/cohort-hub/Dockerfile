@@ -6,11 +6,15 @@
 #     -e COHORT_ALLOWED_ORIGINS=tauri://localhost,http://tauri.localhost \
 #     cohort-hub
 
-FROM rust:1.88-slim AS build
+# Keep this tag in lockstep with rust-toolchain.toml.
+FROM rust:1.98.0-slim AS build
 WORKDIR /src
-COPY Cargo.toml ./
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY crates ./crates
 # Only the hub and its path dependencies are needed; strip the app member.
+# That trim prunes the app's entries from the lockfile, so --locked cannot
+# be used here - the committed Cargo.lock still drives every version that
+# remains in the graph.
 RUN sed -i 's#, "app/src-tauri"##' Cargo.toml \
     && cargo build --release -p cohort-hub
 
