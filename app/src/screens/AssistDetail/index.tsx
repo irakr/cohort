@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   Bot,
@@ -17,8 +17,16 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { snapshotPaths } from "../../api/agent";
-import { apiPost } from "../../api/client";
+import {
+  installSshKey,
+  openSsh,
+  snapshotPaths,
+  sshPublicKey,
+  sshTargetSuggestion,
+  suggestArtifacts,
+  terminalActivity,
+} from "../../api/agent";
+import { apiGet, apiPost } from "../../api/client";
 import { useApi } from "../../api/hooks";
 import type {
   AssistArtifact,
@@ -31,7 +39,7 @@ import type {
 import { FileTree } from "../../components/FileTree";
 import { TerminalPane } from "../../components/TerminalPane";
 import { AvatarChip, IconTile, Modal, SectionTitle, Spinner, StatusPill } from "../../components/ui";
-import { CATEGORY_LABELS, renderMarkdown, timeAgo } from "../../util";
+import { CATEGORY_LABELS, renderMarkdown, timeAgo, timeUntil } from "../../util";
 import { useNav } from "../../app/router";
 import { getCurrentUserId } from "../../api/currentUser";
 
@@ -45,12 +53,83 @@ export function AssistDetail({ assistRef }: { assistRef: string }) {
     refetch,
   } = useApi<AssistDetailT>(`/api/assists/${assistRef}`, { pollMs: 5000 });
   const isMember = !!assist && (assist.viewer_is_owner || assist.viewer_is_responder);
+  // Polled so snapshot and terminal-activity updates from the owner's
+  // engine reach responders without re-entering the screen.
   const { data: liveData } = useApi<LiveData>(
     isMember ? `/api/assists/${assistRef}/artifacts` : null,
+    { pollMs: 5000 },
   );
   const [viewFile, setViewFile] = useState<string | null>(null);
   const [requestOpen, setRequestOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [sshApprove, setSshApprove] = useState<ScopeRequest | null>(null);
+
+  // While the owner has an open assist on screen, their engine's current
+  // scan (terminals, agents, suggested paths) is published to the hub so
+  // the responder's request wizard can offer real options. Terminals with an
+  // active grant additionally get their live process activity published as
+  // the terminal feed (real PTY streaming arrives with the detector).
+  const isOwnerOpen = !!assist && assist.viewer_is_owner && assist.status !== "done";
+  const grantedTerminalsRef = useRef<string[]>([]);
+  grantedTerminalsRef.current = assist
+    ? assist.grants
+        .filter((g) => g.kind === "terminal" && g.target !== null)
+        .map((g) => g.target as string)
+    : [];
+  useEffect(() => {
+    if (!isOwnerOpen) {
+      return;
+    }
+    let cancelled = false;
+    const publish = async () => {
+      const groups = await suggestArtifacts();
+      if (cancelled) {
+        return;
+      }
+      const items = groups.flatMap((g) => g.items).map((it) => ({
+        id: it.id,
+        kind: it.kind,
+        label: it.label,
+        detail: it.detail,
+        icon: it.icon,
+        pid: it.pid,
+      }));
+      if (items.length === 0) {
+        return; // no local engine (e.g. browser dev): publish nothing
+      }
+      try {
+        await apiPost(`/api/assists/${assistRef}/catalog`, { items });
+      } catch (e) {
+        console.error("catalog publish failed:", e);
+      }
+
+      const granted = grantedTerminalsRef.current;
+      if (granted.length === 0) {
+        return;
+      }
+      const feed = await terminalActivity(granted);
+      if (!feed || cancelled) {
+        return;
+      }
+      try {
+        // Merge onto the freshest live data so file snapshots survive.
+        const current = await apiGet<LiveData>(`/api/assists/${assistRef}/artifacts`);
+        await apiPost(`/api/assists/${assistRef}/artifacts`, {
+          ...current,
+          terminal_tabs: granted,
+          terminal_feed: feed,
+        });
+      } catch (e) {
+        console.error("terminal activity publish failed:", e);
+      }
+    };
+    void publish();
+    const timer = setInterval(() => void publish(), 10000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [isOwnerOpen, assistRef]);
 
   if (loading) {
     return (
@@ -89,10 +168,16 @@ export function AssistDetail({ assistRef }: { assistRef: string }) {
     }
   }
 
-  // Owner approval. Approving a file grant re-snapshots every shared and
-  // granted path locally and uploads the full snapshot, so the responder's
-  // tree gains the new path within a poll.
+  // Owner approval. SSH requests open a dedicated dialog (the owner supplies
+  // the connection target and the responder's key gets installed). Approving
+  // a file grant re-snapshots every shared and granted path locally and
+  // uploads the full snapshot, so the responder's tree gains the new path
+  // within a poll.
   async function approveRequest(r: ScopeRequest) {
+    if (r.kind === "ssh") {
+      setSshApprove(r);
+      return;
+    }
     await act(async () => {
       await apiPost(`/api/scope-requests/${r.id}/approve`);
       if (r.kind !== "file" || !assist) {
@@ -237,15 +322,44 @@ export function AssistDetail({ assistRef }: { assistRef: string }) {
         <RequestArtifactsModal
           assist={assist}
           onClose={() => setRequestOpen(false)}
-          onSend={(kind, target, reason) =>
+          onSend={(kind, target, reason, payload) =>
             void act(async () => {
               await apiPost(`/api/assists/${assist.ref}/scope-requests`, {
                 kind,
                 target,
                 reason,
+                payload: payload ?? null,
                 ttl_minutes: 240,
               });
               setRequestOpen(false);
+            })
+          }
+        />
+      )}
+
+      {sshApprove && (
+        <SshApproveModal
+          assist={assist}
+          request={sshApprove}
+          busy={busy}
+          onClose={() => setSshApprove(null)}
+          onConfirm={(target) =>
+            void act(async () => {
+              // Install the responder's key first; without it the grant
+              // would not actually work.
+              if (sshApprove.payload) {
+                const installed = await installSshKey(
+                  sshApprove.payload,
+                  `${assist.ref}:${sshApprove.id}`,
+                );
+                if (!installed) {
+                  throw new Error(
+                    "could not install the responder's SSH key on this machine",
+                  );
+                }
+              }
+              await apiPost(`/api/scope-requests/${sshApprove.id}/approve`, { target });
+              setSshApprove(null);
             })
           }
         />
@@ -565,7 +679,7 @@ function OwnerPanel({
                 </span>
                 <span style={{ color: "var(--color-neutral-600)" }}>{g.granted_to_name}</span>
                 <span style={{ color: "var(--color-neutral-500)", fontSize: 11.5 }}>
-                  {g.expires_at ? `expires ${timeAgo(g.expires_at)}` : "until close"}
+                  {g.expires_at ? `expires ${timeUntil(g.expires_at)}` : "until close"}
                 </span>
               </div>
             ))}
@@ -731,8 +845,19 @@ function ResponderPanel({
             <div className="card" style={{ padding: 16 }}>
               <SectionTitle>Terminal view</SectionTitle>
               <p style={{ fontSize: 12.5, color: "var(--color-neutral-500)", margin: 0 }}>
-                No terminal stream shared on this assist. Real-time terminal
-                capture arrives with the detector.
+                {grantFor("terminal") ? (
+                  <>
+                    <Spinner size={12} /> Terminal granted - waiting for{" "}
+                    {assist.owner_name}'s engine to publish activity (it
+                    updates while they view this assist).
+                  </>
+                ) : (
+                  <>
+                    No terminal granted yet - use "Request artifacts" to ask
+                    for one. The view shows live process activity; full
+                    output streaming arrives with the detector.
+                  </>
+                )}
               </p>
             </div>
           )}
@@ -772,15 +897,22 @@ function ResponderPanel({
 
         <div className="card" style={{ gridColumn: "span 3", padding: 12 }}>
           <SectionTitle>Device access / SSH</SectionTitle>
-          {sshGrant ? (
+          {sshGrant && sshGrant.target ? (
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <span
                 style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--color-success)" }}
               />
-              <span className="mono" style={{ fontSize: 12.5 }}>
-                {sshGrant.target ?? "staging host"}
+              <span className="mono" style={{ fontSize: 12.5, flex: 1 }}>
+                {sshGrant.target}
               </span>
-              <span className="tag tag-neutral">key forwarded</span>
+              <button
+                className="btn btn-primary"
+                style={{ padding: "5px 12px", fontSize: 12 }}
+                title="Open an SSH session in your terminal"
+                onClick={() => void openSsh(sshGrant.target as string)}
+              >
+                Connect
+              </button>
             </div>
           ) : (
             <GatedNote pending={!!sshPending} label="Device access" />
@@ -804,6 +936,81 @@ function GatedNote({ pending, label }: { pending: boolean; label: string }) {
   );
 }
 
+function CatalogPickList({
+  items,
+  emptyText,
+  selected,
+  connected = [],
+  onSelect,
+}: {
+  items: AssistArtifact[];
+  emptyText: string;
+  selected: string;
+  /** Labels already granted to this responder: shown Connected, not selectable. */
+  connected?: string[];
+  onSelect: (label: string) => void;
+}) {
+  if (items.length === 0) {
+    return <p style={{ fontSize: 12.5, color: "var(--color-neutral-600)", margin: 0 }}>{emptyText}</p>;
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {items.map((item) => {
+        const isConnected = connected.includes(item.label);
+        const on = !isConnected && selected === item.label;
+        return (
+          <button
+            key={item.id}
+            className="btn"
+            disabled={isConnected}
+            title={isConnected ? "Already granted to you" : undefined}
+            style={{
+              justifyContent: "flex-start",
+              gap: 10,
+              boxShadow: on ? "inset 0 0 0 2px var(--color-accent)" : undefined,
+              background: on ? "var(--color-accent-100)" : undefined,
+            }}
+            onClick={() => onSelect(item.label)}
+          >
+            <SharedArtifactIcon artifact={item} />
+            <span style={{ minWidth: 0, textAlign: "left", flex: 1 }}>
+              <span style={{ display: "block", fontSize: 13 }}>{item.label}</span>
+              <span
+                style={{
+                  display: "block",
+                  fontSize: 11,
+                  fontWeight: 400,
+                  color: "var(--color-neutral-600)",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {item.detail}
+              </span>
+            </span>
+            {isConnected ? (
+              <span className="tag tag-accent" style={{ fontSize: 10.5 }}>
+                Connected
+              </span>
+            ) : (
+              item.pid !== null && (
+                <span className="tag tag-neutral mono" style={{ fontSize: 10.5 }}>
+                  pid {item.pid}
+                </span>
+              )
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// The request wizard is populated by the owner's engine: the owner's app
+// publishes its current scan (catalog) to the hub while the assist is open,
+// and the responder picks from real running terminals/agents and suggested
+// paths. SSH carries this machine's public key with the request.
 function RequestArtifactsModal({
   assist,
   onClose,
@@ -811,12 +1018,20 @@ function RequestArtifactsModal({
 }: {
   assist: AssistDetailT;
   onClose: () => void;
-  onSend: (kind: ScopeKind, target: string | null, reason: string) => void;
+  onSend: (kind: ScopeKind, target: string | null, reason: string, payload?: string) => void;
 }) {
+  const me = getCurrentUserId();
   const [step, setStep] = useState<"pick" | Exclude<ScopeKind, "comment" | "live_debug">>("pick");
   const [target, setTarget] = useState("");
   const [reason, setReason] = useState("");
-  const [scanning, setScanning] = useState(false);
+  // undefined = still reading; null = no key on this machine.
+  const [myKey, setMyKey] = useState<string | null | undefined>(undefined);
+
+  useEffect(() => {
+    if (step === "ssh" && myKey === undefined) {
+      void sshPublicKey().then(setMyKey);
+    }
+  }, [step, myKey]);
 
   const kinds: { kind: Exclude<ScopeKind, "comment" | "live_debug">; label: string; icon: typeof FileText }[] = [
     { kind: "file", label: "Files and directories", icon: FileText },
@@ -825,28 +1040,44 @@ function RequestArtifactsModal({
     { kind: "ssh", label: "Device access (SSH)", icon: TerminalSquare },
   ];
 
-  const grantedCount = (kind: ScopeKind) =>
-    assist.grants.filter((g) => g.kind === kind).length;
+  const grantedCount = (kind: ScopeKind) => assist.grants.filter((g) => g.kind === kind).length;
+  const catalogFor = (kind: "terminal" | "ai_agent" | "file") =>
+    assist.catalog.filter((i) => i.kind === kind);
+  const scannedNote =
+    assist.catalog_at !== null
+      ? `Scanned on ${assist.owner_name}'s machine ${timeAgo(assist.catalog_at)} ago.`
+      : `${assist.owner_name}'s engine has not scanned yet - it publishes while they view this assist.`;
 
   const pickStep = (kind: Exclude<ScopeKind, "comment" | "live_debug">) => {
     setStep(kind);
     setTarget("");
     setReason("");
-    if (kind === "terminal" || kind === "agents") {
-      setScanning(true);
-      setTimeout(() => setScanning(false), 1200);
-    }
   };
 
-  const placeholders: Record<string, string> = {
-    file: "path/to/file or directory/",
-    terminal: "terminal name, e.g. iTerm2 (payments)",
-    agents: "agent, e.g. Claude Code",
-    ssh: "user@host",
-  };
+  const reasonField = (
+    <div className="field">
+      <label>Reason (shown to {assist.owner_name})</label>
+      <input
+        className="input"
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        placeholder="why you need it"
+      />
+    </div>
+  );
+
+  // Previously provided SSH access for this responder, newest last.
+  const myCredentials = assist.scope_requests.filter(
+    (r) => r.kind === "ssh" && r.requester_id === me && r.status === "approved" && r.target,
+  );
+  const sshPendingMine = assist.scope_requests.some(
+    (r) => r.kind === "ssh" && r.requester_id === me && r.status === "pending",
+  );
+  const grantActive = (requestId: number) =>
+    assist.grants.some((g) => g.scope_request_id === requestId);
 
   return (
-    <Modal width={460} onClose={onClose}>
+    <Modal width={480} onClose={onClose}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
         {step !== "pick" && (
           <button className="btn" style={{ padding: 6 }} onClick={() => setStep("pick")} title="Back">
@@ -858,7 +1089,7 @@ function RequestArtifactsModal({
         </h3>
       </div>
 
-      {step === "pick" ? (
+      {step === "pick" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {kinds.map(({ kind, label, icon: Icon }) => (
             <button
@@ -878,45 +1109,238 @@ function RequestArtifactsModal({
             {assist.owner_name} approves each request. Your reason tells them what to look at.
           </p>
         </div>
-      ) : scanning ? (
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--color-neutral-600)" }}>
-          <Spinner size={14} />
-          {step === "terminal"
-            ? "Listing active terminal sessions on the owner's machine..."
-            : "Listing agent sessions on the owner's machine..."}
-        </span>
-      ) : (
+      )}
+
+      {(step === "terminal" || step === "agents") && (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <div className="field">
-            <label>Target</label>
-            <input
-              className="input mono"
-              value={target}
-              onChange={(e) => setTarget(e.target.value)}
-              placeholder={placeholders[step]}
-            />
-          </div>
-          <div className="field">
-            <label>Reason (shown to {assist.owner_name})</label>
-            <input
-              className="input"
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="why you need it"
-            />
-          </div>
+          <CatalogPickList
+            items={catalogFor(step === "terminal" ? "terminal" : "ai_agent")}
+            emptyText={
+              step === "terminal"
+                ? `No terminals are running on ${assist.owner_name}'s machine right now.`
+                : `No AI agents are running on ${assist.owner_name}'s machine right now.`
+            }
+            selected={target}
+            connected={assist.grants
+              .filter((g) => g.kind === step && g.granted_to_id === me && g.target !== null)
+              .map((g) => g.target as string)}
+            onSelect={setTarget}
+          />
+          <p style={{ fontSize: 11.5, color: "var(--color-neutral-500)", margin: 0 }}>{scannedNote}</p>
+          {reasonField}
           <button
             className="btn btn-primary"
-            disabled={!reason.trim()}
-            onClick={() => onSend(step, target.trim() || null, reason.trim())}
+            disabled={!reason.trim() || !target}
+            onClick={() => onSend(step, target, reason.trim())}
           >
-            {step === "ssh" ? "Send SSH request" : "Request access"}
+            Request access
           </button>
           <p style={{ fontSize: 11.5, color: "var(--color-neutral-500)", margin: 0 }}>
             Read-only, expires in 4h, revocable by the owner at any time.
           </p>
         </div>
       )}
+
+      {step === "file" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {catalogFor("file").length > 0 && (
+            <div className="field">
+              <label>Suggested by {assist.owner_name}'s engine</label>
+              <CatalogPickList
+                items={catalogFor("file")}
+                emptyText=""
+                selected={target}
+                onSelect={(label) => {
+                  const item = catalogFor("file").find((i) => i.label === label);
+                  setTarget(item?.detail ?? label);
+                }}
+              />
+            </div>
+          )}
+          <div className="field">
+            <label>Path</label>
+            <input
+              className="input mono"
+              value={target}
+              onChange={(e) => setTarget(e.target.value)}
+              placeholder="path/to/file or directory/"
+            />
+          </div>
+          <p style={{ fontSize: 11.5, color: "var(--color-neutral-500)", margin: 0 }}>{scannedNote}</p>
+          {reasonField}
+          <button
+            className="btn btn-primary"
+            disabled={!reason.trim() || !target.trim()}
+            onClick={() => onSend("file", target.trim(), reason.trim())}
+          >
+            Request access
+          </button>
+          <p style={{ fontSize: 11.5, color: "var(--color-neutral-500)", margin: 0 }}>
+            Read-only, expires in 4h, revocable by the owner at any time.
+          </p>
+        </div>
+      )}
+
+      {step === "ssh" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {myCredentials.length > 0 && (
+            <div className="field">
+              <label>Provided access</label>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {myCredentials.map((c) => (
+                  <div
+                    key={c.id}
+                    className="card"
+                    style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px" }}
+                  >
+                    <span className="mono" style={{ fontSize: 12.5, flex: 1 }}>
+                      {c.target}
+                    </span>
+                    {grantActive(c.id) ? (
+                      <button
+                        className="btn btn-primary"
+                        style={{ padding: "5px 12px", fontSize: 12 }}
+                        title="Open an SSH session in your terminal"
+                        onClick={() => void openSsh(c.target as string)}
+                      >
+                        Connect
+                      </button>
+                    ) : (
+                      <span className="tag tag-neutral">expired</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {sshPendingMine ? (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--color-neutral-600)" }}>
+              <Spinner size={14} />
+              Request sent. Waiting for {assist.owner_name}.
+            </span>
+          ) : myKey === undefined ? (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--color-neutral-600)" }}>
+              <Spinner size={14} /> Reading this machine's SSH key...
+            </span>
+          ) : myKey === null ? (
+            <p style={{ fontSize: 12.5, color: "var(--color-warning-fg)", margin: 0 }}>
+              No SSH key found on this machine. Create one with ssh-keygen, then
+              reopen this dialog.
+            </p>
+          ) : (
+            <>
+              <div className="field">
+                <label>Your public key (sent with the request)</label>
+                <div
+                  className="mono"
+                  style={{
+                    fontSize: 11,
+                    background: "var(--color-neutral-100)",
+                    borderRadius: 8,
+                    padding: "6px 10px",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {myKey}
+                </div>
+              </div>
+              {reasonField}
+              <button
+                className="btn btn-primary"
+                disabled={!reason.trim()}
+                onClick={() => onSend("ssh", null, reason.trim(), myKey)}
+              >
+                Request SSH access
+              </button>
+              <p style={{ fontSize: 11.5, color: "var(--color-neutral-500)", margin: 0 }}>
+                On approval, {assist.owner_name} authorizes this key on their
+                machine and shares the connection target - passwordless, no
+                secrets stored.
+              </p>
+            </>
+          )}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+// Owner-side SSH approval: shows the responder's key, takes the connection
+// target, and (on confirm) installs the key into authorized_keys before the
+// hub approval is recorded.
+function SshApproveModal({
+  assist,
+  request,
+  busy,
+  onClose,
+  onConfirm,
+}: {
+  assist: AssistDetailT;
+  request: ScopeRequest;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: (target: string) => void;
+}) {
+  const [target, setTarget] = useState("");
+
+  useEffect(() => {
+    void sshTargetSuggestion().then((s) => setTarget((prev) => (prev === "" ? s : prev)));
+  }, []);
+
+  return (
+    <Modal width={480} onClose={onClose}>
+      <h3 style={{ fontSize: 16, marginBottom: 4 }}>Grant SSH access</h3>
+      <p style={{ fontSize: 13, color: "var(--color-neutral-600)", margin: "0 0 12px" }}>
+        {request.requester_name}: "{request.reason}"
+      </p>
+      {request.payload ? (
+        <div className="field" style={{ marginBottom: 10 }}>
+          <label>{request.requester_name}'s public key</label>
+          <div
+            className="mono"
+            style={{
+              fontSize: 11,
+              background: "var(--color-neutral-100)",
+              borderRadius: 8,
+              padding: "6px 10px",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {request.payload}
+          </div>
+        </div>
+      ) : (
+        <p style={{ fontSize: 12.5, color: "var(--color-warning-fg)", margin: "0 0 10px" }}>
+          No public key came with this request; the responder will need their
+          own way to authenticate.
+        </p>
+      )}
+      <div className="field" style={{ marginBottom: 12 }}>
+        <label>Connection target they will use</label>
+        <input
+          className="input mono"
+          value={target}
+          onChange={(e) => setTarget(e.target.value)}
+          placeholder="user@host"
+        />
+      </div>
+      <button
+        className="btn btn-primary btn-block"
+        disabled={busy || target.trim() === ""}
+        onClick={() => onConfirm(target.trim())}
+      >
+        Authorize key and grant
+      </button>
+      <p style={{ fontSize: 11.5, color: "var(--color-neutral-500)", margin: "10px 0 0" }}>
+        The key is added to ~/.ssh/authorized_keys on this machine, tagged
+        cohort:{assist.ref}:{request.id}. Until revoke ships, withdraw access
+        by deleting that tagged line.
+      </p>
     </Modal>
   );
 }

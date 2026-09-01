@@ -1,27 +1,34 @@
 import { useEffect, useRef, useState } from "react";
 
-/** Read-only terminal stream, replayed from the assist's seeded feed. */
+/** Read-only terminal activity view, fed by the owner's engine. The feed is
+    one list with `== <terminal>` section headers; each tab shows only its
+    own section. Header (`==`) and command (`$`) lines are accented. */
 export function TerminalPane({ tabs, feed }: { tabs: string[]; feed: string[] }) {
   const [activeTab, setActiveTab] = useState(0);
-  const [visibleCount, setVisibleCount] = useState(Math.min(3, feed.length));
   const bodyRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (visibleCount >= feed.length) {
-      return;
+  // Split the merged feed into per-terminal sections. A feed without
+  // section headers (e.g. seeded assists) is shown whole under every tab.
+  const sections: { header: string; lines: string[] }[] = [];
+  for (const line of feed) {
+    if (line.startsWith("== ")) {
+      sections.push({ header: line, lines: [line] });
+    } else if (sections.length > 0) {
+      sections[sections.length - 1].lines.push(line);
     }
-    const timer = setInterval(
-      () => setVisibleCount((n) => Math.min(n + 1, feed.length)),
-      2600,
-    );
-    return () => clearInterval(timer);
-  }, [visibleCount, feed.length]);
+  }
+  const activeLabel = tabs[Math.min(activeTab, tabs.length - 1)] ?? "";
+  const lines =
+    sections.length === 0
+      ? feed
+      : sections.find((s) => s.header.includes(activeLabel))?.lines ?? [
+          `== ${activeLabel}`,
+          "  (no activity captured yet)",
+        ];
 
   useEffect(() => {
     bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight });
-  }, [visibleCount]);
-
-  const lines = feed.slice(0, visibleCount).slice(-14);
+  }, [feed, activeTab]);
 
   return (
     <div>
@@ -65,9 +72,14 @@ export function TerminalPane({ tabs, feed }: { tabs: string[]; feed: string[] })
         {lines.map((line, i) => (
           <div
             key={i}
-            style={{ color: line.startsWith("$") ? "var(--color-accent-300)" : undefined }}
+            style={{
+              color:
+                line.startsWith("$") || line.startsWith("==")
+                  ? "var(--color-accent-300)"
+                  : undefined,
+            }}
           >
-            {line}
+            {line === "" ? "\u00a0" : line}
           </div>
         ))}
       </div>

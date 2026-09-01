@@ -27,6 +27,7 @@ pub fn api_router() -> Router<AppState> {
             "/api/assists/{ref}/artifacts",
             get(assists::live_data).post(assists::set_live_data),
         )
+        .route("/api/assists/{ref}/catalog", post(assists::set_catalog))
         .route("/api/assists/{ref}/scope-requests", post(scope_requests::create))
         .route("/api/assists/{ref}/record-draft", get(assists::record_draft))
         .route("/api/assists/{ref}/close", post(assists::close))

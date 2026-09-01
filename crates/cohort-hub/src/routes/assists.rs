@@ -167,6 +167,32 @@ pub async fn set_live_data(
     Ok(Json(data))
 }
 
+/// Owner-published catalog: what the owner's engine currently sees (running
+/// terminals, agents, suggested paths). Populates the responder's request
+/// wizard; refreshed while the owner has the assist open.
+pub async fn set_catalog(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(ref_): Path<String>,
+    Json(upload): Json<CatalogUpload>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let viewer = db::current_user(&state.pool, &headers).await?;
+    let row = db::assist_row(&state.pool, &ref_).await?;
+    if row.owner_id != viewer.id {
+        return Err(AppError::Forbidden("only the owner publishes the catalog".into()));
+    }
+    if row.status == AssistStatus::Done {
+        return Err(AppError::BadRequest("this assist is closed".into()));
+    }
+    sqlx::query("UPDATE assists SET catalog = ?, catalog_at = ? WHERE ref = ?")
+        .bind(serde_json::to_string(&upload.items).map_err(|e| AppError::BadRequest(e.to_string()))?)
+        .bind(now_rfc3339())
+        .bind(&ref_)
+        .execute(&state.pool)
+        .await?;
+    Ok(Json(serde_json::json!({ "status": "ok" })))
+}
+
 /// Live data (file tree, file contents, terminal feed, agent chat).
 /// The client gates each pane on the viewer's grants; when the owner agent
 /// module streams for real, enforcement moves server-side with it.

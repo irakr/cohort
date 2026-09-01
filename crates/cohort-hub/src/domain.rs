@@ -116,6 +116,9 @@ pub struct ScopeRequest {
     pub target: Option<String>,
     pub reason: String,
     pub status: ScopeStatus,
+    /// Request payload, e.g. the responder's SSH public key on ssh requests.
+    #[serde(default)]
+    pub payload: Option<String>,
     #[ts(type = "number | null")]
     pub ttl_minutes: Option<i64>,
     pub created_at: String,
@@ -158,6 +161,10 @@ pub struct AssistDetail {
     pub responders: Vec<User>,
     pub scope_requests: Vec<ScopeRequest>,
     pub grants: Vec<Grant>,
+    /// What the owner's engine currently sees (see CatalogUpload); empty
+    /// until the owner's app publishes while viewing the assist.
+    pub catalog: Vec<AssistArtifact>,
+    pub catalog_at: Option<String>,
     pub viewer_is_owner: bool,
     pub viewer_is_responder: bool,
     pub created_at: String,
@@ -192,8 +199,27 @@ pub struct CreateScopeRequest {
     pub target: Option<String>,
     pub reason: String,
     #[serde(default)]
+    pub payload: Option<String>,
+    #[serde(default)]
     #[ts(type = "number | null")]
     pub ttl_minutes: Option<i64>,
+}
+
+/// Body of an approve decision. For ssh requests the owner supplies the
+/// connection target (user@host) here.
+#[derive(Debug, Clone, Default, Deserialize, TS)]
+#[cfg_attr(feature = "ts-export", ts(export))]
+pub struct DecideScopeRequest {
+    #[serde(default)]
+    pub target: Option<String>,
+}
+
+/// Owner-published snapshot of what their engine currently sees (running
+/// terminals and agents, suggested paths), for the responder's request wizard.
+#[derive(Debug, Clone, Deserialize, TS)]
+#[cfg_attr(feature = "ts-export", ts(export))]
+pub struct CatalogUpload {
+    pub items: Vec<AssistArtifact>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]

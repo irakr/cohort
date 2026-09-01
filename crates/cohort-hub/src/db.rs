@@ -84,6 +84,8 @@ pub struct AssistRow {
     pub insights: String,
     pub environment: Vec<String>,
     pub live_data: Option<LiveData>,
+    pub catalog: Vec<AssistArtifact>,
+    pub catalog_at: Option<String>,
     pub created_at: String,
     pub closed_at: Option<String>,
 }
@@ -101,6 +103,7 @@ pub async fn assist_row(pool: &SqlitePool, ref_: &str) -> Result<AssistRow, AppE
     let category: Option<String> = row.get("category");
     let environment: String = row.get("environment");
     let live_data: Option<String> = row.get("live_data");
+    let catalog: Option<String> = row.get("catalog");
     Ok(AssistRow {
         ref_: row.get("ref"),
         title: row.get("title"),
@@ -116,6 +119,10 @@ pub async fn assist_row(pool: &SqlitePool, ref_: &str) -> Result<AssistRow, AppE
         insights: row.get("insights"),
         environment: serde_json::from_str(&environment).unwrap_or_default(),
         live_data: live_data.and_then(|s| serde_json::from_str(&s).ok()),
+        catalog: catalog
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default(),
+        catalog_at: row.get("catalog_at"),
         created_at: row.get("created_at"),
         closed_at: row.get("closed_at"),
     })
@@ -200,6 +207,7 @@ pub async fn scope_requests_for(
                 target: r.get("target"),
                 reason: r.get("reason"),
                 status: parse_enum(&status)?,
+                payload: r.get("payload"),
                 ttl_minutes: r.get("ttl_minutes"),
                 created_at: r.get("created_at"),
                 decided_at: r.get("decided_at"),
@@ -271,6 +279,8 @@ pub async fn assist_detail(
         responders,
         scope_requests,
         grants,
+        catalog: row.catalog,
+        catalog_at: row.catalog_at,
         viewer_is_owner,
         viewer_is_responder,
         created_at: row.created_at,

@@ -15,4 +15,9 @@ description: string,
  * AI-drafted analysis of the shared artifacts; empty until the Cohort AI
  * integration is enabled (the UI shows N/A).
  */
-insights: string, environment: Array<string>, artifacts: Array<AssistArtifact>, responders: Array<User>, scope_requests: Array<ScopeRequest>, grants: Array<Grant>, viewer_is_owner: boolean, viewer_is_responder: boolean, created_at: string, closed_at: string | null, };
+insights: string, environment: Array<string>, artifacts: Array<AssistArtifact>, responders: Array<User>, scope_requests: Array<ScopeRequest>, grants: Array<Grant>, 
+/**
+ * What the owner's engine currently sees (see CatalogUpload); empty
+ * until the owner's app publishes while viewing the assist.
+ */
+catalog: Array<AssistArtifact>, catalog_at: string | null, viewer_is_owner: boolean, viewer_is_responder: boolean, created_at: string, closed_at: string | null, };

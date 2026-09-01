@@ -21,6 +21,46 @@ fn env_fingerprint() -> Vec<String> {
     LocalAgent.env_fingerprint()
 }
 
+/// Owner side: what is running in the granted terminals right now (process
+/// list per tty). Published to the hub while the assist is open; real PTY
+/// streaming arrives with the detector.
+#[tauri::command]
+fn terminal_activity(labels: Vec<String>) -> Vec<String> {
+    cohort_agent::scan::terminal_activity(&labels)
+}
+
+fn home() -> std::path::PathBuf {
+    std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default()
+}
+
+/// This machine's SSH public key (travels with an ssh access request).
+#[tauri::command]
+fn ssh_public_key() -> Option<String> {
+    cohort_agent::ssh::public_key(&home())
+}
+
+/// Suggested user@host for granting SSH access to this machine.
+#[tauri::command]
+fn ssh_target_suggestion() -> String {
+    cohort_agent::ssh::target_suggestion()
+}
+
+/// Owner side: install a responder's public key (tagged with the marker)
+/// into authorized_keys. Runs only on explicit grant approval.
+#[tauri::command]
+fn install_ssh_key(public_key: String, marker: String) -> Result<(), String> {
+    cohort_agent::ssh::install_key(&home(), &public_key, &marker).map_err(|e| e.to_string())?;
+    log::info!("installed ssh key for grant {marker}");
+    Ok(())
+}
+
+/// Responder side: open the system terminal running ssh to a granted target.
+#[tauri::command]
+fn open_ssh(target: String) -> Result<(), String> {
+    log::info!("opening ssh session to {target}");
+    cohort_agent::ssh::open_terminal_ssh(&target)
+}
+
 /// Snapshot shared files/directories (bounded, redacted) for upload to the
 /// hub as the assist's live data. Runs only on explicit share or grant.
 #[tauri::command]
@@ -65,7 +105,12 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             suggest_artifacts,
             env_fingerprint,
-            snapshot_artifacts
+            snapshot_artifacts,
+            terminal_activity,
+            ssh_public_key,
+            ssh_target_suggestion,
+            install_ssh_key,
+            open_ssh
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

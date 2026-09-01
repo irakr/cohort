@@ -2,4 +2,8 @@
 import type { ScopeKind } from "./ScopeKind";
 import type { ScopeStatus } from "./ScopeStatus";
 
-export type ScopeRequest = { id: number, assist_ref: string, requester_id: string, requester_name: string, kind: ScopeKind, target: string | null, reason: string, status: ScopeStatus, ttl_minutes: number | null, created_at: string, decided_at: string | null, };
+export type ScopeRequest = { id: number, assist_ref: string, requester_id: string, requester_name: string, kind: ScopeKind, target: string | null, reason: string, status: ScopeStatus, 
+/**
+ * Request payload, e.g. the responder's SSH public key on ssh requests.
+ */
+payload: string | null, ttl_minutes: number | null, created_at: string, decided_at: string | null, };

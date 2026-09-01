@@ -15,6 +15,26 @@ export function timeAgo(iso: string): string {
   return `${Math.round(hours / 24)} d`;
 }
 
+/** "in 4 h" / "in 12 min" / "expired" for a future RFC3339 timestamp. */
+export function timeUntil(iso: string): string {
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) {
+    return "";
+  }
+  const minutes = Math.round((then - Date.now()) / 60000);
+  if (minutes <= 0) {
+    return "expired";
+  }
+  if (minutes < 60) {
+    return `in ${minutes} min`;
+  }
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) {
+    return `in ${hours} h`;
+  }
+  return `in ${Math.round(hours / 24)} d`;
+}
+
 /** Minimal markdown for the brief goal: bold, italics, code, links, bullets. */
 export function renderMarkdown(src: string): string {
   const escape = (s: string) =>

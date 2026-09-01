@@ -262,6 +262,53 @@ async fn live_debug_request_and_approval_unlocks_grant() {
         .any(|g| g["kind"] == "live_debug" && g["granted_to_id"] == "u-priya"));
 }
 
+#[tokio::test]
+async fn catalog_and_ssh_key_flow() {
+    let app = app().await;
+
+    // Owner publishes what their engine sees; responders read it.
+    let catalog = json!({ "items": [
+        { "id": "t-ttys004", "kind": "terminal", "label": "Terminal (ttys004)",
+          "detail": "/work/payments", "pid": 4210 },
+        { "id": "a-claude", "kind": "ai_agent", "label": "Claude Code",
+          "detail": "agent session active", "pid": 3229 }
+    ]});
+    let (status, _) = call(&app, "POST", "/api/assists/S-2409/catalog", Some("u-priya"), Some(catalog.clone())).await;
+    assert_eq!(status, StatusCode::FORBIDDEN); // responders cannot publish
+    let (status, _) = call(&app, "POST", "/api/assists/S-2409/catalog", Some("u-alex"), Some(catalog)).await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, detail) = call(&app, "GET", "/api/assists/S-2409", Some("u-priya"), None).await;
+    assert_eq!(detail["catalog"].as_array().unwrap().len(), 2);
+    assert!(detail["catalog_at"].is_string());
+
+    // The responder's ssh request carries their public key; the owner's
+    // approval supplies the connection target, which lands on the grant.
+    let (status, created) = call(
+        &app, "POST", "/api/assists/S-2409/scope-requests", Some("u-priya"),
+        Some(json!({
+            "kind": "ssh",
+            "reason": "need to inspect the harness box",
+            "payload": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA priya@laptop",
+            "ttl_minutes": 240
+        })),
+    ).await;
+    assert_eq!(status, StatusCode::OK);
+    let id = created["id"].as_i64().unwrap();
+    assert!(created["payload"].as_str().unwrap().starts_with("ssh-ed25519"));
+
+    let (status, approved) = call(
+        &app, "POST", &format!("/api/scope-requests/{id}/approve"), Some("u-alex"),
+        Some(json!({ "target": "alex@spark-b4de.local" })),
+    ).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(approved["target"], "alex@spark-b4de.local");
+
+    let (_, detail) = call(&app, "GET", "/api/assists/S-2409", Some("u-priya"), None).await;
+    let grant = detail["grants"].as_array().unwrap().iter()
+        .find(|g| g["kind"] == "ssh").expect("ssh grant");
+    assert_eq!(grant["target"], "alex@spark-b4de.local");
+}
+
 // ---- Create and join ----
 
 #[tokio::test]

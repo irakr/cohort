@@ -50,8 +50,8 @@ pub async fn create(
         ("pending", None)
     };
     let result = sqlx::query(
-        "INSERT INTO scope_requests (assist_ref, requester_id, kind, target, reason, status, ttl_minutes, created_at, decided_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO scope_requests (assist_ref, requester_id, kind, target, reason, status, payload, ttl_minutes, created_at, decided_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&ref_)
     .bind(&viewer.id)
@@ -59,6 +59,7 @@ pub async fn create(
     .bind(&req.target)
     .bind(req.reason.trim())
     .bind(status)
+    .bind(&req.payload)
     .bind(req.ttl_minutes)
     .bind(now_rfc3339())
     .bind(&decided_at)
@@ -72,8 +73,10 @@ pub async fn approve(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<i64>,
+    body: Option<Json<DecideScopeRequest>>,
 ) -> Result<Json<ScopeRequest>, AppError> {
-    decide(state, headers, id, "approved").await
+    let target = body.and_then(|b| b.0.target);
+    decide(state, headers, id, "approved", target).await
 }
 
 pub async fn deny(
@@ -81,7 +84,7 @@ pub async fn deny(
     headers: HeaderMap,
     Path(id): Path<i64>,
 ) -> Result<Json<ScopeRequest>, AppError> {
-    decide(state, headers, id, "denied").await
+    decide(state, headers, id, "denied", None).await
 }
 
 async fn decide(
@@ -89,6 +92,7 @@ async fn decide(
     headers: HeaderMap,
     id: i64,
     status: &str,
+    target: Option<String>,
 ) -> Result<Json<ScopeRequest>, AppError> {
     let viewer = db::current_user(&state.pool, &headers).await?;
     let request = fetch(&state, id).await?;
@@ -99,10 +103,21 @@ async fn decide(
     if request.status != ScopeStatus::Pending {
         return Err(AppError::BadRequest("this request was already decided".into()));
     }
-    sqlx::query("UPDATE scope_requests SET status = ?, decided_at = ? WHERE id = ?")
-        .bind(status).bind(now_rfc3339()).bind(id)
-        .execute(&state.pool)
-        .await?;
+    // For ssh, approval carries the owner-supplied connection target.
+    match target.map(|t| t.trim().to_string()).filter(|t| !t.is_empty()) {
+        Some(t) => {
+            sqlx::query("UPDATE scope_requests SET status = ?, decided_at = ?, target = ? WHERE id = ?")
+                .bind(status).bind(now_rfc3339()).bind(t).bind(id)
+                .execute(&state.pool)
+                .await?;
+        }
+        None => {
+            sqlx::query("UPDATE scope_requests SET status = ?, decided_at = ? WHERE id = ?")
+                .bind(status).bind(now_rfc3339()).bind(id)
+                .execute(&state.pool)
+                .await?;
+        }
+    }
     Ok(Json(fetch(&state, id).await?))
 }
 
@@ -130,6 +145,7 @@ async fn fetch(state: &AppState, id: i64) -> Result<ScopeRequest, AppError> {
         target: r.get("target"),
         reason: r.get("reason"),
         status,
+        payload: r.get("payload"),
         ttl_minutes: r.get("ttl_minutes"),
         created_at: r.get("created_at"),
         decided_at: r.get("decided_at"),

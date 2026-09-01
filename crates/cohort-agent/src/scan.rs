@@ -172,6 +172,63 @@ pub fn terminal_artifacts(
     out
 }
 
+/// The tty inside a terminal label like "Shell (ttys001)" or "iTerm2 (pts/0)".
+pub fn tty_from_label(label: &str) -> Option<String> {
+    let start = label.rfind('(')? + 1;
+    let end = label.rfind(')')?;
+    let tty = label.get(start..end)?;
+    let valid = !tty.is_empty()
+        && tty.chars().all(|c| c.is_ascii_alphanumeric() || c == '/');
+    valid.then(|| tty.to_string())
+}
+
+/// Feed lines for one terminal from its `ps -t <tty>` output: a header with
+/// the working directory, then one line per running process.
+pub fn activity_lines(label: &str, cwd: Option<&str>, ps_output: &str) -> Vec<String> {
+    let mut out = vec![match cwd {
+        Some(c) => format!("== {label} - {c}"),
+        None => format!("== {label}"),
+    }];
+    let mut any = false;
+    for line in ps_output.lines() {
+        let line = line.trim();
+        if !line.is_empty() {
+            out.push(format!("  {line}"));
+            any = true;
+        }
+    }
+    if !any {
+        out.push("  (no processes on this tty)".to_string());
+    }
+    out
+}
+
+/// What is actually running in the granted terminals right now. This is the
+/// truthful terminal view until the detector streams real PTY output:
+/// process list (pid, elapsed, command) per granted tty, refreshed by the
+/// owner's app while the assist is open.
+pub fn terminal_activity(labels: &[String]) -> Vec<String> {
+    let procs = list_processes();
+    let mut out = Vec::new();
+    for label in labels {
+        let Some(tty) = tty_from_label(label) else { continue };
+        let ps_output = Command::new("ps")
+            .args(["-t", &tty, "-o", "pid=,etime=,args="])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+            .unwrap_or_default();
+        let cwd = procs
+            .iter()
+            .find(|p| p.tty == tty && is_shell(&p.exe_basename()))
+            .and_then(|p| cwd_of(p.pid));
+        if !out.is_empty() {
+            out.push(String::new());
+        }
+        out.extend(activity_lines(label, cwd.as_deref(), &ps_output));
+    }
+    out
+}
+
 /// Recent Claude Code activity: the most recently touched transcript under
 /// ~/.claude/projects, and the working directory it records.
 pub fn claude_activity(home: &Path) -> Option<(String, u64)> {
@@ -387,6 +444,28 @@ mod tests {
             "  512     1 ttys001 -zsh\n  513     1 ttys001 /bin/zsh\n",
         );
         assert_eq!(terminal_artifacts(&procs, |_| None, |_| None).len(), 1);
+    }
+
+    #[test]
+    fn tty_labels_parse_and_reject_junk() {
+        assert_eq!(tty_from_label("Shell (ttys001)").as_deref(), Some("ttys001"));
+        assert_eq!(tty_from_label("GNOME Terminal (pts/0)").as_deref(), Some("pts/0"));
+        assert_eq!(tty_from_label("no parens"), None);
+        assert_eq!(tty_from_label("bad (tty; rm)"), None);
+    }
+
+    #[test]
+    fn activity_lines_carry_header_and_processes() {
+        let lines = activity_lines(
+            "Shell (ttys001)",
+            Some("/work/payments"),
+            " 1604 05:12 -zsh\n 1799 00:40 vim notes.md\n",
+        );
+        assert_eq!(lines[0], "== Shell (ttys001) - /work/payments");
+        assert_eq!(lines[2], "  1799 00:40 vim notes.md");
+
+        let empty = activity_lines("Shell (ttys009)", None, "\n");
+        assert_eq!(empty[1], "  (no processes on this tty)");
     }
 
     #[test]
