@@ -15,36 +15,34 @@ function renderScreen() {
 }
 
 describe("New assist picker", () => {
-  it("shows an honest empty state outside the agent module, Create disabled", async () => {
+  it("starts with no artifacts and Create disabled", async () => {
     mockHubFetch();
     renderScreen();
-    // No canned suggestions: the agent module reports nothing here.
-    await waitFor(() =>
-      expect(screen.getByText(/Nothing detected right now/)).toBeTruthy(),
-    );
-    expect(screen.getByText(/nothing selected/)).toBeTruthy();
+    await waitFor(() => expect(screen.getByText(/No artifacts yet/)).toBeTruthy());
+    expect(screen.getByText(/None selected/)).toBeTruthy();
     const create = screen.getByRole("button", { name: "Create assist" }) as HTMLButtonElement;
     expect(create.disabled).toBe(true);
   });
 
-  it("adds a manual artifact, counts it for analysis; a title enables Create", async () => {
+  it("adds a custom path via the dialog; a title enables Create", async () => {
     mockHubFetch();
     const { container } = renderScreen();
-    await waitFor(() =>
-      expect(screen.getByText(/Nothing detected right now/)).toBeTruthy(),
-    );
+    await waitFor(() => expect(screen.getByText(/No artifacts yet/)).toBeTruthy());
 
-    await userEvent.click(screen.getByRole("button", { name: "Add artifacts" }));
-    await userEvent.click(screen.getByRole("button", { name: /Add a file or directory/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Add artifacts/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Files & Directories/ }));
     await userEvent.type(
       screen.getByPlaceholderText("path/to/file or directory/"),
       "k8s/payments/deployment.yaml",
     );
-    await userEvent.click(screen.getByRole("button", { name: "Add read-only" }));
+    await userEvent.click(screen.getByRole("button", { name: "Add path" }));
+    // Selected count shows in the dialog footer, then on the page card.
+    expect(screen.getByText(/1 selected for analysis/)).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Done" }));
 
     await waitFor(() => {
-      expect(container.textContent).toContain("For analysis - 1 item");
-      expect(screen.getByText("Added by you")).toBeTruthy();
+      expect(container.textContent).toContain("Artifacts - 1 selected");
+      expect(screen.getByText("deployment.yaml")).toBeTruthy();
     });
 
     const create = screen.getByRole("button", { name: "Create assist" }) as HTMLButtonElement;

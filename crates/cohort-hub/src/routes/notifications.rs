@@ -22,6 +22,7 @@ fn kind_label(kind: &str) -> &'static str {
         "terminal" => "terminal stream",
         "agents" => "agents view",
         "ssh" => "device access",
+        "window" => "application window view",
         _ => "scope",
     }
 }

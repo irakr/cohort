@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  AppWindow,
   ArrowLeft,
   Bot,
   Check,
-  ChevronLeft,
   Clock,
   FileText,
   Folder,
   Lock,
   MessageCircle,
+  Plus,
   Radio,
   Send,
   SquareTerminal,
@@ -321,16 +322,19 @@ export function AssistDetail({ assistRef }: { assistRef: string }) {
       {requestOpen && (
         <RequestArtifactsModal
           assist={assist}
+          busy={busy}
           onClose={() => setRequestOpen(false)}
-          onSend={(kind, target, reason, payload) =>
+          onSubmit={(requests, reason) =>
             void act(async () => {
-              await apiPost(`/api/assists/${assist.ref}/scope-requests`, {
-                kind,
-                target,
-                reason,
-                payload: payload ?? null,
-                ttl_minutes: 240,
-              });
+              for (const request of requests) {
+                await apiPost(`/api/assists/${assist.ref}/scope-requests`, {
+                  kind: request.kind,
+                  target: request.target,
+                  reason,
+                  payload: request.payload,
+                  ttl_minutes: 240,
+                });
+              }
               setRequestOpen(false);
             })
           }
@@ -577,6 +581,7 @@ const KIND_ICON: Record<ScopeKind, typeof FileText> = {
   terminal: SquareTerminal,
   agents: Bot,
   ssh: TerminalSquare,
+  window: AppWindow,
 };
 
 function requestTitle(r: ScopeRequest): string {
@@ -936,335 +941,618 @@ function GatedNote({ pending, label }: { pending: boolean; label: string }) {
   );
 }
 
-function CatalogPickList({
-  items,
-  emptyText,
-  selected,
-  connected = [],
-  onSelect,
-}: {
-  items: AssistArtifact[];
-  emptyText: string;
-  selected: string;
-  /** Labels already granted to this responder: shown Connected, not selectable. */
-  connected?: string[];
-  onSelect: (label: string) => void;
-}) {
-  if (items.length === 0) {
-    return <p style={{ fontSize: 12.5, color: "var(--color-neutral-600)", margin: 0 }}>{emptyText}</p>;
-  }
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      {items.map((item) => {
-        const isConnected = connected.includes(item.label);
-        const on = !isConnected && selected === item.label;
-        return (
-          <button
-            key={item.id}
-            className="btn"
-            disabled={isConnected}
-            title={isConnected ? "Already granted to you" : undefined}
-            style={{
-              justifyContent: "flex-start",
-              gap: 10,
-              boxShadow: on ? "inset 0 0 0 2px var(--color-accent)" : undefined,
-              background: on ? "var(--color-accent-100)" : undefined,
-            }}
-            onClick={() => onSelect(item.label)}
-          >
-            <SharedArtifactIcon artifact={item} />
-            <span style={{ minWidth: 0, textAlign: "left", flex: 1 }}>
-              <span style={{ display: "block", fontSize: 13 }}>{item.label}</span>
-              <span
-                style={{
-                  display: "block",
-                  fontSize: 11,
-                  fontWeight: 400,
-                  color: "var(--color-neutral-600)",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {item.detail}
-              </span>
-            </span>
-            {isConnected ? (
-              <span className="tag tag-accent" style={{ fontSize: 10.5 }}>
-                Connected
-              </span>
-            ) : (
-              item.pid !== null && (
-                <span className="tag tag-neutral mono" style={{ fontSize: 10.5 }}>
-                  pid {item.pid}
-                </span>
-              )
-            )}
-          </button>
-        );
-      })}
-    </div>
-  );
+// The redesigned request wizard: category tabs on the left, compact
+// multi-select rows on the right, one batch "Request access". Options come
+// from the owner-published catalog; already-granted items show as shared.
+interface ReqRow {
+  key: string;
+  kind: ScopeKind;
+  label: string;
+  detail: string;
+  icon: string | null;
+  granted: boolean;
+  selectable: boolean;
+  target: string | null;
 }
 
-// The request wizard is populated by the owner's engine: the owner's app
-// publishes its current scan (catalog) to the hub while the assist is open,
-// and the responder picks from real running terminals/agents and suggested
-// paths. SSH carries this machine's public key with the request.
+function ReqIcon({ row }: { row: ReqRow }) {
+  if (row.icon) {
+    return (
+      <img
+        src={row.icon}
+        alt=""
+        width={19}
+        height={19}
+        style={{ borderRadius: 5, flexShrink: 0, objectFit: "contain" }}
+      />
+    );
+  }
+  const Glyph =
+    row.kind === "terminal"
+      ? SquareTerminal
+      : row.kind === "agents"
+        ? Bot
+        : row.kind === "window"
+          ? AppWindow
+          : row.kind === "ssh"
+            ? TerminalSquare
+            : row.label.includes(".")
+              ? FileText
+              : Folder;
+  const color =
+    row.kind === "file" && !row.label.includes(".")
+      ? "#64a8e8"
+      : row.label.includes("Claude")
+        ? "#d97757"
+        : "var(--color-neutral-600)";
+  return <Glyph size={15} color={color} style={{ flexShrink: 0 }} />;
+}
+
+interface ReqCategory {
+  id: string;
+  name: string;
+  icon: typeof FileText;
+  desc: string;
+  subs: { name: string; rows: ReqRow[] }[];
+  custom?: boolean;
+  note?: string;
+}
+
 function RequestArtifactsModal({
   assist,
+  busy,
   onClose,
-  onSend,
+  onSubmit,
 }: {
   assist: AssistDetailT;
+  busy: boolean;
   onClose: () => void;
-  onSend: (kind: ScopeKind, target: string | null, reason: string, payload?: string) => void;
+  onSubmit: (
+    requests: { kind: ScopeKind; target: string | null; payload: string | null }[],
+    reason: string,
+  ) => void;
 }) {
   const me = getCurrentUserId();
-  const [step, setStep] = useState<"pick" | Exclude<ScopeKind, "comment" | "live_debug">>("pick");
-  const [target, setTarget] = useState("");
+  const [activeId, setActiveId] = useState("files");
+  const [picked, setPicked] = useState<Record<string, boolean>>({});
+  const [chips, setChips] = useState<string[]>([]);
+  const [fileDraft, setFileDraft] = useState("");
   const [reason, setReason] = useState("");
   // undefined = still reading; null = no key on this machine.
   const [myKey, setMyKey] = useState<string | null | undefined>(undefined);
 
   useEffect(() => {
-    if (step === "ssh" && myKey === undefined) {
-      void sshPublicKey().then(setMyKey);
-    }
-  }, [step, myKey]);
+    void sshPublicKey().then(setMyKey);
+  }, []);
 
-  const kinds: { kind: Exclude<ScopeKind, "comment" | "live_debug">; label: string; icon: typeof FileText }[] = [
-    { kind: "file", label: "Files and directories", icon: FileText },
-    { kind: "terminal", label: "Terminal stream", icon: SquareTerminal },
-    { kind: "agents", label: "Agents view", icon: Bot },
-    { kind: "ssh", label: "Device access (SSH)", icon: TerminalSquare },
+  const myGrants = assist.grants.filter((g) => g.granted_to_id === me);
+  const grantedTargets = (kind: ScopeKind) =>
+    myGrants.filter((g) => g.kind === kind && g.target !== null).map((g) => g.target as string);
+  const catalogFor = (kind: string) => assist.catalog.filter((i) => i.kind === kind);
+  const sshPendingMine = assist.scope_requests.some(
+    (r) => r.kind === "ssh" && r.requester_id === me && r.status === "pending",
+  );
+  const myCredentials = assist.scope_requests.filter(
+    (r) => r.kind === "ssh" && r.requester_id === me && r.status === "approved" && r.target,
+  );
+  const grantActive = (requestId: number) =>
+    assist.grants.some((g) => g.scope_request_id === requestId);
+
+  const catalogRow = (item: AssistArtifact, kind: ScopeKind, target: string): ReqRow => {
+    const granted = grantedTargets(kind).includes(target);
+    return {
+      key: `${kind}:${target}`,
+      kind,
+      label: item.label,
+      detail: item.detail,
+      icon: item.icon,
+      granted,
+      selectable: !granted,
+      target,
+    };
+  };
+
+  const categories: ReqCategory[] = [
+    {
+      id: "files",
+      name: "Files & Directories",
+      icon: FileText,
+      desc: "Ask for read access to paths. Snapshotted read-only and redacted.",
+      custom: true,
+      subs: [
+        {
+          name: "Already shared",
+          rows: grantedTargets("file").map((t) => ({
+            key: `shared:${t}`,
+            kind: "file" as ScopeKind,
+            label: t.split("/").filter(Boolean).pop() ?? t,
+            detail: t,
+            icon: null,
+            granted: true,
+            selectable: false,
+            target: t,
+          })),
+        },
+        {
+          name: "Suggested",
+          rows: catalogFor("file").map((i) => catalogRow(i, "file", i.detail)),
+        },
+        {
+          name: "Added by you",
+          rows: chips.map((p) => ({
+            key: `file:${p}`,
+            kind: "file" as ScopeKind,
+            label: p.split("/").filter(Boolean).pop() ?? p,
+            detail: p,
+            icon: null,
+            granted: false,
+            selectable: true,
+            target: p,
+          })),
+        },
+      ],
+    },
+    {
+      id: "term",
+      name: "Terminals",
+      icon: SquareTerminal,
+      desc: "View a session as a read-only stream. You see output, never type.",
+      subs: [
+        {
+          name: "Active sessions",
+          rows: catalogFor("terminal").map((i) => catalogRow(i, "terminal", i.label)),
+        },
+      ],
+      note: `No terminals are running on ${assist.owner_name}'s machine right now.`,
+    },
+    {
+      id: "agents",
+      name: "AI agents",
+      icon: Bot,
+      desc: "See the agent run's errors and context. Read-only.",
+      subs: [
+        {
+          name: "Detected",
+          rows: catalogFor("ai_agent").map((i) => catalogRow(i, "agents", i.label)),
+        },
+      ],
+      note: `No AI agents are running on ${assist.owner_name}'s machine right now.`,
+    },
+    {
+      id: "appwin",
+      name: "Application window",
+      icon: AppWindow,
+      desc: "Streams the window pixel-for-pixel, like a screenshare. View-only - you never control it.",
+      subs: [
+        {
+          name: "Open windows",
+          rows: catalogFor("window").map((i) => catalogRow(i, "window", i.label)),
+        },
+      ],
+      note: "Window enumeration on the owner's machine arrives with the mirroring milestone.",
+    },
+    {
+      id: "ssh",
+      name: "Device access",
+      icon: TerminalSquare,
+      desc: "Encrypted end-to-end. The owner authorizes your key and shares the address after approval.",
+      subs: [
+        {
+          name: "Connection",
+          rows: [
+            {
+              key: "ssh",
+              kind: "ssh" as ScopeKind,
+              label: "SSH",
+              detail: sshPendingMine
+                ? `request pending - waiting for ${assist.owner_name}`
+                : myKey === null
+                  ? "no SSH key on this machine - create one with ssh-keygen"
+                  : myKey === undefined
+                    ? "reading this machine's SSH key..."
+                    : "your public key is sent; the owner shares the address",
+              icon: null,
+              granted: false,
+              selectable: !sshPendingMine && typeof myKey === "string",
+              target: null,
+            },
+          ],
+        },
+      ],
+    },
   ];
 
-  const grantedCount = (kind: ScopeKind) => assist.grants.filter((g) => g.kind === kind).length;
-  const catalogFor = (kind: "terminal" | "ai_agent" | "file") =>
-    assist.catalog.filter((i) => i.kind === kind);
+  const active = categories.find((c) => c.id === activeId) ?? categories[0];
+  const allRows = categories.flatMap((c) => c.subs.flatMap((s) => s.rows));
+  const selectedRows = allRows.filter((r) => picked[r.key] && r.selectable);
+  const countIn = (c: ReqCategory) =>
+    c.subs.flatMap((s) => s.rows).filter((r) => picked[r.key] && r.selectable).length;
+  const total = selectedRows.length;
+  const countLabel = total === 0 ? "Nothing selected" : `${total} artifact${total > 1 ? "s" : ""}`;
   const scannedNote =
     assist.catalog_at !== null
       ? `Scanned on ${assist.owner_name}'s machine ${timeAgo(assist.catalog_at)} ago.`
       : `${assist.owner_name}'s engine has not scanned yet - it publishes while they view this assist.`;
 
-  const pickStep = (kind: Exclude<ScopeKind, "comment" | "live_debug">) => {
-    setStep(kind);
-    setTarget("");
-    setReason("");
+  const addChip = () => {
+    const p = fileDraft.trim();
+    if (p !== "" && !chips.includes(p)) {
+      setChips((c) => [...c, p]);
+      setPicked((prev) => ({ ...prev, [`file:${p}`]: true }));
+    }
+    setFileDraft("");
   };
 
-  const reasonField = (
-    <div className="field">
-      <label>Reason (shown to {assist.owner_name})</label>
-      <input
-        className="input"
-        value={reason}
-        onChange={(e) => setReason(e.target.value)}
-        placeholder="why you need it"
-      />
-    </div>
-  );
-
-  // Previously provided SSH access for this responder, newest last.
-  const myCredentials = assist.scope_requests.filter(
-    (r) => r.kind === "ssh" && r.requester_id === me && r.status === "approved" && r.target,
-  );
-  const sshPendingMine = assist.scope_requests.some(
-    (r) => r.kind === "ssh" && r.requester_id === me && r.status === "pending",
-  );
-  const grantActive = (requestId: number) =>
-    assist.grants.some((g) => g.scope_request_id === requestId);
+  const submit = () => {
+    onSubmit(
+      selectedRows.map((r) => ({
+        kind: r.kind,
+        target: r.target,
+        payload: r.kind === "ssh" ? (myKey as string) : null,
+      })),
+      reason.trim(),
+    );
+  };
 
   return (
-    <Modal width={480} onClose={onClose}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
-        {step !== "pick" && (
-          <button className="btn" style={{ padding: 6 }} onClick={() => setStep("pick")} title="Back">
-            <ChevronLeft size={15} />
-          </button>
-        )}
-        <h3 style={{ fontSize: 16 }}>
-          {step === "pick" ? "Request artifacts" : kinds.find((k) => k.kind === step)?.label}
-        </h3>
-      </div>
-
-      {step === "pick" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {kinds.map(({ kind, label, icon: Icon }) => (
-            <button
-              key={kind}
-              className="btn"
-              style={{ justifyContent: "flex-start" }}
-              onClick={() => pickStep(kind)}
-            >
-              <Icon size={14} />
-              {label}
-              <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--color-neutral-500)" }}>
-                {grantedCount(kind) > 0 ? `${grantedCount(kind)} granted` : "not granted"}
-              </span>
-            </button>
-          ))}
-          <p style={{ fontSize: 12, color: "var(--color-neutral-600)", margin: "6px 0 0" }}>
-            {assist.owner_name} approves each request. Your reason tells them what to look at.
-          </p>
-        </div>
-      )}
-
-      {(step === "terminal" || step === "agents") && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <CatalogPickList
-            items={catalogFor(step === "terminal" ? "terminal" : "ai_agent")}
-            emptyText={
-              step === "terminal"
-                ? `No terminals are running on ${assist.owner_name}'s machine right now.`
-                : `No AI agents are running on ${assist.owner_name}'s machine right now.`
-            }
-            selected={target}
-            connected={assist.grants
-              .filter((g) => g.kind === step && g.granted_to_id === me && g.target !== null)
-              .map((g) => g.target as string)}
-            onSelect={setTarget}
-          />
-          <p style={{ fontSize: 11.5, color: "var(--color-neutral-500)", margin: 0 }}>{scannedNote}</p>
-          {reasonField}
+    <div className="overlay" onClick={onClose} style={{ padding: 30 }}>
+      <div
+        className="fade-in"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: "#fff",
+          borderRadius: 14,
+          boxShadow: "var(--shadow-lg)",
+          width: "min(940px, 100%)",
+          height: "min(620px, 88vh)",
+          display: "grid",
+          gridTemplateRows: "auto 1fr auto",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            padding: "15px 20px",
+            borderBottom: "1px solid var(--color-neutral-200)",
+          }}
+        >
+          <span style={{ fontSize: 15.5, fontWeight: 700 }}>Request artifacts</span>
+          <span style={{ fontSize: 12, color: "var(--color-neutral-600)" }}>
+            Sent to {assist.owner_name} to approve - read-only
+          </span>
           <button
-            className="btn btn-primary"
-            disabled={!reason.trim() || !target}
-            onClick={() => onSend(step, target, reason.trim())}
+            title="Close"
+            aria-label="Close"
+            style={{
+              border: "none",
+              background: "transparent",
+              cursor: "pointer",
+              marginLeft: "auto",
+              width: 28,
+              height: 28,
+              borderRadius: 7,
+              display: "grid",
+              placeItems: "center",
+              color: "var(--color-neutral-600)",
+            }}
+            onClick={onClose}
           >
-            Request access
+            <X size={14} />
           </button>
-          <p style={{ fontSize: 11.5, color: "var(--color-neutral-500)", margin: 0 }}>
-            Read-only, expires in 4h, revocable by the owner at any time.
-          </p>
         </div>
-      )}
 
-      {step === "file" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {catalogFor("file").length > 0 && (
-            <div className="field">
-              <label>Suggested by {assist.owner_name}'s engine</label>
-              <CatalogPickList
-                items={catalogFor("file")}
-                emptyText=""
-                selected={target}
-                onSelect={(label) => {
-                  const item = catalogFor("file").find((i) => i.label === label);
-                  setTarget(item?.detail ?? label);
-                }}
-              />
-            </div>
-          )}
-          <div className="field">
-            <label>Path</label>
-            <input
-              className="input mono"
-              value={target}
-              onChange={(e) => setTarget(e.target.value)}
-              placeholder="path/to/file or directory/"
-            />
-          </div>
-          <p style={{ fontSize: 11.5, color: "var(--color-neutral-500)", margin: 0 }}>{scannedNote}</p>
-          {reasonField}
-          <button
-            className="btn btn-primary"
-            disabled={!reason.trim() || !target.trim()}
-            onClick={() => onSend("file", target.trim(), reason.trim())}
+        <div style={{ display: "grid", gridTemplateColumns: "212px 1fr", minHeight: 0 }}>
+          <div
+            style={{
+              background: "var(--color-neutral-100)",
+              borderRight: "1px solid var(--color-neutral-200)",
+              padding: "12px 10px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 3,
+            }}
           >
-            Request access
-          </button>
-          <p style={{ fontSize: 11.5, color: "var(--color-neutral-500)", margin: 0 }}>
-            Read-only, expires in 4h, revocable by the owner at any time.
-          </p>
-        </div>
-      )}
-
-      {step === "ssh" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {myCredentials.length > 0 && (
-            <div className="field">
-              <label>Provided access</label>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {myCredentials.map((c) => (
-                  <div
-                    key={c.id}
-                    className="card"
-                    style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px" }}
-                  >
-                    <span className="mono" style={{ fontSize: 12.5, flex: 1 }}>
-                      {c.target}
-                    </span>
-                    {grantActive(c.id) ? (
-                      <button
-                        className="btn btn-primary"
-                        style={{ padding: "5px 12px", fontSize: 12 }}
-                        title="Open an SSH session in your terminal"
-                        onClick={() => void openSsh(c.target as string)}
-                      >
-                        Connect
-                      </button>
-                    ) : (
-                      <span className="tag tag-neutral">expired</span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {sshPendingMine ? (
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--color-neutral-600)" }}>
-              <Spinner size={14} />
-              Request sent. Waiting for {assist.owner_name}.
-            </span>
-          ) : myKey === undefined ? (
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--color-neutral-600)" }}>
-              <Spinner size={14} /> Reading this machine's SSH key...
-            </span>
-          ) : myKey === null ? (
-            <p style={{ fontSize: 12.5, color: "var(--color-warning-fg)", margin: 0 }}>
-              No SSH key found on this machine. Create one with ssh-keygen, then
-              reopen this dialog.
-            </p>
-          ) : (
-            <>
-              <div className="field">
-                <label>Your public key (sent with the request)</label>
-                <div
-                  className="mono"
+            {categories.map((c) => {
+              const on = c.id === active.id;
+              const n = countIn(c);
+              const Icon = c.icon;
+              return (
+                <button
+                  key={c.id}
+                  onClick={() => setActiveId(c.id)}
                   style={{
-                    fontSize: 11,
-                    background: "var(--color-neutral-100)",
+                    border: "none",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 9,
+                    padding: "9px 11px",
                     borderRadius: 8,
-                    padding: "6px 10px",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
+                    background: on ? "#fff" : "transparent",
+                    color: on ? "var(--color-text)" : "var(--color-neutral-700)",
+                    boxShadow: on ? "var(--shadow-sm)" : "none",
+                    font: "inherit",
+                    fontSize: 13,
+                    fontWeight: on ? 700 : 500,
+                    textAlign: "left",
                   }}
                 >
-                  {myKey}
+                  <Icon size={14} />
+                  <span
+                    style={{ flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                  >
+                    {c.name}
+                  </span>
+                  {n > 0 && (
+                    <span
+                      style={{
+                        minWidth: 18,
+                        height: 18,
+                        borderRadius: 9,
+                        background: "var(--color-accent)",
+                        color: "#fff",
+                        display: "grid",
+                        placeItems: "center",
+                        fontSize: 10.5,
+                        fontWeight: 700,
+                        padding: "0 5px",
+                      }}
+                    >
+                      {n}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          <div style={{ overflow: "auto", padding: "18px 22px" }}>
+            <div style={{ fontSize: 14.5, fontWeight: 700 }}>{active.name}</div>
+            <div style={{ fontSize: 12, color: "var(--color-neutral-600)", margin: "2px 0 16px" }}>
+              {active.desc}
+            </div>
+            {active.subs.every((s) => s.rows.length === 0) && (
+              <p style={{ fontSize: 12.5, color: "var(--color-neutral-600)", margin: "0 0 12px" }}>
+                {active.note}
+              </p>
+            )}
+            {active.subs
+              .filter((s) => s.rows.length > 0)
+              .map((sub) => (
+                <div key={sub.name} style={{ marginBottom: 18, maxWidth: 620 }}>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.07em",
+                      color: "var(--color-neutral-600)",
+                      marginBottom: 7,
+                    }}
+                  >
+                    {sub.name}
+                  </div>
+                  <div style={{ display: "grid", gap: 3 }}>
+                    {sub.rows.map((row) => {
+                      const on = !!picked[row.key] && row.selectable;
+                      return (
+                        <label
+                          key={row.key}
+                          title={row.granted ? "Already shared with you" : undefined}
+                          style={{
+                            position: "relative",
+                            display: "flex",
+                            gap: 11,
+                            alignItems: "center",
+                            padding: "8px 12px",
+                            background: on ? "var(--color-accent-100)" : "var(--color-neutral-100)",
+                            borderRadius: 8,
+                            cursor: row.selectable ? "pointer" : "default",
+                            boxShadow: on ? "inset 0 0 0 1.5px var(--color-accent)" : "none",
+                          }}
+                        >
+                          <ReqIcon row={row} />
+                          <span
+                            style={{
+                              fontSize: 13,
+                              fontWeight: 600,
+                              whiteSpace: "nowrap",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              flexShrink: 0,
+                            }}
+                          >
+                            {row.label}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: 11.5,
+                              color: "var(--color-neutral-500)",
+                              whiteSpace: "nowrap",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              flex: 1,
+                              minWidth: 0,
+                            }}
+                          >
+                            {row.detail}
+                          </span>
+                          {row.granted && (
+                            <span className="tag tag-neutral" style={{ fontSize: 10 }}>
+                              shared
+                            </span>
+                          )}
+                          {row.selectable && (
+                            <>
+                              <span
+                                style={{
+                                  width: 17,
+                                  height: 17,
+                                  borderRadius: "50%",
+                                  background: on ? "var(--color-accent)" : "#fff",
+                                  boxShadow: on
+                                    ? "none"
+                                    : "inset 0 0 0 1.5px var(--color-neutral-300)",
+                                  color: "#fff",
+                                  display: "grid",
+                                  placeItems: "center",
+                                  flexShrink: 0,
+                                  transition: "background .15s ease",
+                                }}
+                              >
+                                {on && <Check size={10} strokeWidth={3.2} />}
+                              </span>
+                              <input
+                                type="checkbox"
+                                checked={on}
+                                onChange={() =>
+                                  setPicked((p) => ({ ...p, [row.key]: !p[row.key] }))
+                                }
+                                style={{ position: "absolute", opacity: 0, width: 0, height: 0 }}
+                              />
+                            </>
+                          )}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+
+            {active.id === "ssh" && myCredentials.length > 0 && (
+              <div style={{ marginBottom: 18, maxWidth: 620 }}>
+                <div
+                  style={{
+                    fontSize: 11,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.07em",
+                    color: "var(--color-neutral-600)",
+                    marginBottom: 7,
+                  }}
+                >
+                  Provided access
+                </div>
+                <div style={{ display: "grid", gap: 3 }}>
+                  {myCredentials.map((c) => (
+                    <div
+                      key={c.id}
+                      style={{
+                        display: "flex",
+                        gap: 11,
+                        alignItems: "center",
+                        padding: "8px 12px",
+                        background: "var(--color-neutral-100)",
+                        borderRadius: 8,
+                      }}
+                    >
+                      <TerminalSquare size={15} color="var(--color-neutral-600)" />
+                      <span className="mono" style={{ fontSize: 12.5, flex: 1 }}>
+                        {c.target}
+                      </span>
+                      {grantActive(c.id) ? (
+                        <button
+                          className="btn btn-primary"
+                          style={{ padding: "4px 12px", fontSize: 12 }}
+                          title="Open an SSH session in your terminal"
+                          onClick={() => void openSsh(c.target as string)}
+                        >
+                          Connect
+                        </button>
+                      ) : (
+                        <span className="tag tag-neutral">expired</span>
+                      )}
+                    </div>
+                  ))}
                 </div>
               </div>
-              {reasonField}
-              <button
-                className="btn btn-primary"
-                disabled={!reason.trim()}
-                onClick={() => onSend("ssh", null, reason.trim(), myKey)}
-              >
-                Request SSH access
-              </button>
-              <p style={{ fontSize: 11.5, color: "var(--color-neutral-500)", margin: 0 }}>
-                On approval, {assist.owner_name} authorizes this key on their
-                machine and shares the connection target - passwordless, no
-                secrets stored.
-              </p>
-            </>
-          )}
+            )}
+
+            {active.custom && (
+              <div style={{ maxWidth: 620 }}>
+                <div
+                  style={{
+                    fontSize: 11,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.07em",
+                    color: "var(--color-neutral-600)",
+                    marginBottom: 8,
+                  }}
+                >
+                  Enter file/directory paths
+                </div>
+                <div style={{ display: "flex", gap: 8, maxWidth: 420 }}>
+                  <input
+                    className="input mono"
+                    style={{ fontSize: 12.5 }}
+                    value={fileDraft}
+                    onChange={(e) => setFileDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        addChip();
+                      }
+                    }}
+                    placeholder="path/to/file or directory/"
+                  />
+                  <button
+                    title="Add"
+                    aria-label="Add path"
+                    style={{
+                      border: "none",
+                      cursor: "pointer",
+                      width: 36,
+                      height: 36,
+                      borderRadius: 8,
+                      background: "var(--color-neutral-900)",
+                      display: "grid",
+                      placeItems: "center",
+                      color: "#fff",
+                      flexShrink: 0,
+                    }}
+                    onClick={addChip}
+                  >
+                    <Plus size={15} />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <p style={{ fontSize: 11.5, color: "var(--color-neutral-500)", margin: "14px 0 0" }}>
+              {scannedNote}
+            </p>
+          </div>
         </div>
-      )}
-    </Modal>
+
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            padding: "13px 20px",
+            borderTop: "1px solid var(--color-neutral-200)",
+          }}
+        >
+          <input
+            className="input"
+            style={{ maxWidth: 320, fontSize: 12.5 }}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder={`Reason, shown to ${assist.owner_name}`}
+          />
+          <span style={{ marginLeft: "auto", fontSize: 12.5, color: "var(--color-neutral-600)" }}>
+            {countLabel} to request
+          </span>
+          <button
+            className="btn btn-primary"
+            disabled={busy || total === 0 || reason.trim() === ""}
+            onClick={submit}
+          >
+            Request access
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

@@ -58,6 +58,9 @@ pub enum ScopeKind {
     Terminal,
     Agents,
     Ssh,
+    /// Application window mirroring (view-only pixel stream, see the
+    /// mirroring plan). Kind exists ahead of the capture pipeline.
+    Window,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

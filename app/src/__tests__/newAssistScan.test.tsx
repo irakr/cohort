@@ -41,6 +41,7 @@ vi.mock("../api/agent", () => ({
     },
   ]),
   envFingerprint: vi.fn(async () => ["macos aarch64"]),
+  snapshotPaths: vi.fn(async () => null),
 }));
 
 function renderScreen() {
@@ -52,35 +53,35 @@ function renderScreen() {
 }
 
 describe("New assist picker with a live scan", () => {
-  it("renders the scanned terminals and directories as suggestions", async () => {
+  it("shows scanned artifacts inside the dialog, grouped by category", async () => {
     mockHubFetch();
     const { container } = renderScreen();
+    await userEvent.click(screen.getByRole("button", { name: /Add artifacts/ }));
+
+    // Terminals tab is active by default and lists the scanned session
+    // with its real app icon.
     await waitFor(() => expect(screen.getByText("iTerm2 (ttys001)")).toBeTruthy());
+    expect(container.querySelectorAll('img[src^="data:image/png;base64,"]').length).toBe(1);
+
+    // Files tab lists the scanned working directory as a suggested path.
+    await userEvent.click(screen.getByRole("button", { name: /Files & Directories/ }));
     expect(screen.getByText("payments")).toBeTruthy();
-    expect(screen.getAllByText("/work/payments").length).toBe(2);
-
-    // The terminal shows its real app icon; the directory has no app icon
-    // and renders the folder glyph placeholder instead of an <img>.
-    const icons = container.querySelectorAll('img[src^="data:image/png;base64,"]');
-    expect(icons.length).toBe(1);
-
-    await userEvent.click(screen.getByText("iTerm2 (ttys001)"));
-    await waitFor(() => expect(container.textContent).toContain("For analysis - 1 item"));
+    expect(screen.getByText("Suggested")).toBeTruthy();
   });
 
-  it("the Add artifacts wizard re-scans and hides already-listed candidates", async () => {
+  it("selecting in the dialog updates the page's artifact list", async () => {
     mockHubFetch();
-    renderScreen();
+    const { container } = renderScreen();
+    await userEvent.click(screen.getByRole("button", { name: /Add artifacts/ }));
     await waitFor(() => expect(screen.getByText("iTerm2 (ttys001)")).toBeTruthy());
 
-    await userEvent.click(screen.getByRole("button", { name: "Add artifacts" }));
-    await userEvent.click(screen.getByRole("button", { name: /Add a terminal/ }));
+    await userEvent.click(screen.getByText("iTerm2 (ttys001)"));
+    expect(screen.getByText(/1 selected for analysis/)).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Done" }));
 
-    // The scanned terminal is already suggested, so the wizard offers only
-    // manual entry for this type.
-    await waitFor(() =>
-      expect(screen.getByText(/Nothing new detected for this type right now/)).toBeTruthy(),
-    );
-    expect(screen.getByPlaceholderText("terminal name, e.g. iTerm2")).toBeTruthy();
+    await waitFor(() => {
+      expect(container.textContent).toContain("Artifacts - 1 selected");
+      expect(screen.getByText("iTerm2 (ttys001)")).toBeTruthy();
+    });
   });
 });
