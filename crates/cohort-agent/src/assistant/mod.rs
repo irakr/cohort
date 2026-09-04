@@ -69,7 +69,7 @@ pub struct DraftOutcome {
 }
 
 const INSIGHTS_OPTIONS: CallOptions =
-    CallOptions { max_output_tokens: 1024, timeout: Duration::from_secs(60) };
+    CallOptions { max_output_tokens: 2048, timeout: Duration::from_secs(60) };
 
 /// Draft the insights for a new assist from the owner's words plus the
 /// shared files, read here. `None` config means not configured. A reply
@@ -97,12 +97,14 @@ pub async fn draft_insights(cfg: Option<&LlmConfig>, input: &InsightsInput) -> D
         .collect();
     let files = context::file_blocks(&paths, &context::INSIGHTS);
     log::info!(
-        "insights: context {} file(s), {} chars, {} left out of budget, {} snapshot note(s)",
+        "insights: context {} file(s), {} chars, {} left out of budget, {} skipped as low-value, {} snapshot note(s)",
         files.blocks.len(),
         files.blocks.iter().map(|b| b.content.chars().count()).sum::<usize>(),
         files.not_included.len(),
+        files.skipped.len(),
         files.notes.len()
     );
+    log::debug!("insights: files in prompt: {:?}", files.blocks.iter().map(|b| b.path.as_str()).collect::<Vec<_>>());
 
     let http = cohort_llm::client();
     let mut prompt = prompts::insights(input, &files);
@@ -204,16 +206,13 @@ pub fn parse_insights_reply(text: &str) -> Result<BriefDraft, ReplyError> {
             continue;
         }
         match section {
-            // Anything before the first header is preamble.
-            None => {}
             // Insights are prose: a line without a bullet marker still counts.
             Some(Section::Insights) => insights.push(bullet_text(line).to_string()),
             // Chips must be bullets, so a closing remark never becomes one.
-            Some(Section::Environment) => {
-                if is_bullet(line) {
-                    environment.push(bullet_text(line).to_string());
-                }
-            }
+            Some(Section::Environment) if is_bullet(line) => environment.push(bullet_text(line).to_string()),
+            // Preamble before the first header, or a non-bullet line under
+            // ENVIRONMENT: dropped.
+            _ => {}
         }
     }
 
@@ -224,7 +223,7 @@ pub fn parse_insights_reply(text: &str) -> Result<BriefDraft, ReplyError> {
     let insights: Vec<String> = insights.into_iter().filter(|b| !b.is_empty() && !is_none(b)).collect();
     let mut chips: Vec<String> = Vec::new();
     for chip in environment {
-        let chip: String = chip.chars().take(60).collect::<String>().trim().to_string();
+        let chip: String = chip.chars().take(48).collect::<String>().trim().to_string();
         if chip.is_empty() || is_none(&chip) {
             continue;
         }
@@ -232,7 +231,7 @@ pub fn parse_insights_reply(text: &str) -> Result<BriefDraft, ReplyError> {
             continue;
         }
         chips.push(chip);
-        if chips.len() == 12 {
+        if chips.len() == 8 {
             break;
         }
     }
@@ -360,8 +359,8 @@ mod tests {
         let long = "x".repeat(200);
         let many: String = (1..=20).map(|i| format!("- chip {i}\n")).collect();
         let d = parse_insights_reply(&format!("INSIGHTS\n- a\nENVIRONMENT\n- {long}\n{many}")).unwrap();
-        assert_eq!(d.environment[0].len(), 60);
-        assert_eq!(d.environment.len(), 12);
+        assert_eq!(d.environment[0].len(), 48);
+        assert_eq!(d.environment.len(), 8);
     }
 
     // ---- the draft flow, against a fake OpenAI-compatible server ----

@@ -35,8 +35,9 @@ ENVIRONMENT\n\
 - one short chip\n\
 - another short chip\n\
 Under INSIGHTS write 2 to 5 bullets: the intent, what the artifacts show, and the most plausible \
-direction. Under ENVIRONMENT list the languages, frameworks, tools and versions the inputs \
-actually show, one per bullet, a few words each. State ONLY what the inputs say - never invent \
+direction. Under ENVIRONMENT write 3 to 6 bullets naming the languages, frameworks, tools and \
+versions the inputs actually show, each under 40 characters, like a version chip - not the \
+machine, the people, or the situation. State ONLY what the inputs say - never invent \
 failures, file contents, versions, or secrets; <redacted> marks a masked secret, leave it be. \
 If a section has nothing truthful to say, write a single bullet: - none";
 
@@ -76,7 +77,14 @@ pub fn insights(input: &InsightsInput, files: &FileContext) -> Prompt {
         user.push_str("</file>\n");
     }
     if !files.not_included.is_empty() {
-        block(&mut user, "not-included", &files.not_included.join("\n"));
+        block(&mut user, "not-included", &summary(&files.not_included, "did not fit the context budget"));
+    }
+    if !files.skipped.is_empty() {
+        block(
+            &mut user,
+            "skipped",
+            &summary(&files.skipped, "skipped as low-value context (lockfiles, minified bundles, maps)"),
+        );
     }
     if !files.notes.is_empty() {
         block(&mut user, "snapshot-notes", &files.notes.join("\n"));
@@ -104,6 +112,19 @@ fn block(out: &mut String, tag: &str, body: &str) {
     out.push_str(&format!("<{tag}>\n{body}\n</{tag}>\n"));
 }
 
+/// "N file(s) <why>: a, b, c, and 40 more" - the count and a few names,
+/// never every path; a long list of absolute paths once cost more tokens
+/// than the files it described.
+fn summary(paths: &[String], why: &str) -> String {
+    const SHOW: usize = 8;
+    let shown: Vec<&str> = paths.iter().take(SHOW).map(String::as_str).collect();
+    let mut s = format!("{} file(s) {why}: {}", paths.len(), shown.join(", "));
+    if paths.len() > SHOW {
+        s.push_str(&format!(", and {} more", paths.len() - SHOW));
+    }
+    s
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -128,6 +149,7 @@ mod tests {
                 total_chars: 900,
             }],
             not_included: vec!["charts/values.yaml".into()],
+            skipped: vec!["Cargo.lock".into()],
             notes: vec![],
         };
         let prompt = insights(&input, &files);
@@ -144,8 +166,18 @@ mod tests {
         assert!(user.contains("- [ai_agent] Claude Code (agent session active)"));
         assert!(user.contains("<file path=\"k8s/deployment.yaml\" chars=\"900\">\nimage: api:1.9.4\n"));
         assert!(user.contains("[... truncated, 884 more chars]"));
-        assert!(user.contains("<not-included>\ncharts/values.yaml\n</not-included>"));
+        assert!(user.contains("<not-included>\n1 file(s) did not fit the context budget: charts/values.yaml\n</not-included>"));
+        assert!(user.contains("<skipped>\n1 file(s) skipped as low-value context (lockfiles, minified bundles, maps): Cargo.lock\n</skipped>"));
         assert!(user.ends_with("Write the INSIGHTS and ENVIRONMENT sections."));
+    }
+
+    #[test]
+    fn long_exclusion_lists_are_summarised_not_dumped() {
+        let many: Vec<String> = (1..=53).map(|i| format!("Cohort/some/deep/path/file{i}.rs")).collect();
+        let s = summary(&many, "did not fit the context budget");
+        assert!(s.starts_with("53 file(s) did not fit the context budget: Cohort/some/deep/path/file1.rs, "));
+        assert!(s.ends_with("file8.rs, and 45 more"));
+        assert!(!s.contains("file9.rs"));
     }
 
     #[test]
