@@ -1,4 +1,4 @@
-use cohort_hub::{build_router, config::Config, db, logging, seed};
+use cohort_hub::{build_router, config::Config, db, logging};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -7,7 +7,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _log_guard = logging::init(&config);
 
     let pool = db::pool(&config.db).await?;
-    seed::seed(&pool).await?;
 
     let bind = config.bind.clone();
     tracing::info!(db = %config.db, "using database");

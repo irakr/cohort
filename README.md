@@ -27,7 +27,7 @@ resolution record. See `../project-plan.md` for the product plan.
 
 One hub, one app instance per machine:
 
-    make dev-hub    # hub on 127.0.0.1:7400 (seeds SQLite on first run)
+    make dev-hub    # hub on 127.0.0.1:7400 (creates the SQLite file on first run)
     make dev-app    # Tauri app (Vite dev server on :1420 + desktop window)
 
 On first launch the app shows a setup screen: enter the hub URL, then register

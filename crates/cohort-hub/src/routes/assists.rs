@@ -26,8 +26,11 @@ pub async fn list(
         s.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect()
     });
 
+    // Newest first. The ref tiebreak is numeric: refs are 'S-<n>' with no
+    // padding, so a text sort would put S-9 above S-10.
     let rows = sqlx::query(
-        "SELECT a.ref FROM assists a ORDER BY a.created_at DESC, a.ref DESC",
+        "SELECT a.ref FROM assists a
+         ORDER BY a.created_at DESC, CAST(SUBSTR(a.ref, 3) AS INTEGER) DESC",
     )
     .fetch_all(&state.pool)
     .await?;

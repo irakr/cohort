@@ -20,22 +20,22 @@ describe("Delete assist", () => {
     const fetchMock = mockHubFetch();
     render(
       <NavProvider>
-        <AssistDetail assistRef="S-2409" />
+        <AssistDetail assistRef="S-3" />
       </NavProvider>,
     );
 
-    await waitFor(() => expect(screen.getByText(/migration deadlocks/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Migration deadlocks/)).toBeTruthy());
     await userEvent.click(screen.getByRole("button", { name: /Delete assist/ }));
 
     // In-app confirmation, not a native dialog.
-    expect(screen.getByText(/Delete S-2409 and everything shared on it/)).toBeTruthy();
+    expect(screen.getByText(/Delete S-3 and everything shared on it/)).toBeTruthy();
     expect(fetchMock.mock.calls.every((c) => c[1]?.method !== "DELETE")).toBe(true);
 
     await userEvent.click(screen.getByRole("button", { name: "Delete" }));
     await waitFor(() => {
       expect(
         fetchMock.mock.calls.some(
-          (c) => c[1]?.method === "DELETE" && String(c[0]).endsWith("/api/assists/S-2409"),
+          (c) => c[1]?.method === "DELETE" && String(c[0]).endsWith("/api/assists/S-3"),
         ),
       ).toBe(true);
     });
@@ -45,10 +45,10 @@ describe("Delete assist", () => {
     const fetchMock = mockHubFetch();
     render(
       <NavProvider>
-        <AssistDetail assistRef="S-2409" />
+        <AssistDetail assistRef="S-3" />
       </NavProvider>,
     );
-    await waitFor(() => expect(screen.getByText(/migration deadlocks/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Migration deadlocks/)).toBeTruthy());
     await userEvent.click(screen.getByRole("button", { name: /Delete assist/ }));
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByText(/everything shared on it/)).toBeNull();

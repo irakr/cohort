@@ -1,4 +1,5 @@
 import { Rail } from "./app/Rail";
+import { Spinner } from "./components/ui";
 import { Notifications } from "./app/notifications";
 import { NavProvider, useNav } from "./app/router";
 import { OpenAssists } from "./screens/OpenAssists";
@@ -25,9 +26,18 @@ function Screens() {
 }
 
 function Shell() {
-  const { currentUserId } = useNav();
+  const { currentUserId, identityChecked } = useNav();
   if (!currentUserId) {
     return <Setup />;
+  }
+  if (!identityChecked) {
+    // Nothing mounts until the hub confirms this identity: an identity it no
+    // longer knows would fire a burst of 403s before setup took over.
+    return (
+      <div style={{ display: "grid", placeItems: "center", minHeight: "100vh" }}>
+        <Spinner size={22} />
+      </div>
+    );
   }
   // Remount everything when the identity changes (sign-out and back in).
   return (

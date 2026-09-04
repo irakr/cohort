@@ -316,13 +316,13 @@ mod tests {
     #[test]
     fn installs_key_once_with_marker_and_perms() {
         let home = temp_home("install");
-        install_key(&home, "ssh-ed25519 AAAC priya@laptop", "S-2412:7").unwrap();
-        install_key(&home, "ssh-ed25519 AAAC priya@laptop", "S-2412:7").unwrap(); // idempotent
+        install_key(&home, "ssh-ed25519 AAAC responder@laptop", "S-7:3").unwrap();
+        install_key(&home, "ssh-ed25519 AAAC responder@laptop", "S-7:3").unwrap(); // idempotent
         let content = std::fs::read_to_string(home.join(".ssh/authorized_keys")).unwrap();
         assert_eq!(content.matches("AAAC").count(), 1);
-        assert!(content.contains("cohort:S-2412:7"));
+        assert!(content.contains("cohort:S-7:3"));
         // The comment from the key file is replaced by the marker.
-        assert!(!content.contains("priya@laptop"));
+        assert!(!content.contains("responder@laptop"));
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -334,10 +334,10 @@ mod tests {
 
     #[test]
     fn target_validation_blocks_injection() {
-        assert!(valid_target("alex@spark-b4de.local"));
+        assert!(valid_target("owner@build-host.local"));
         assert!(valid_target("u_1@10.0.0.5:2222"));
-        assert!(!valid_target("alex@host; rm -rf /"));
-        assert!(!valid_target("alex@host\"x"));
+        assert!(!valid_target("owner@host; rm -rf /"));
+        assert!(!valid_target("owner@host\"x"));
         assert!(!valid_target("nouser.local"));
         assert!(!valid_target("a@b:22x"));
         assert_eq!(ssh_command("u@h:2222").unwrap(), "ssh -p 2222 u@h");

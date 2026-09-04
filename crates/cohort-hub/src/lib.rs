@@ -5,7 +5,6 @@ pub mod error;
 pub mod llm;
 pub mod logging;
 pub mod routes;
-pub mod seed;
 
 use axum::http::{header, HeaderValue, Method};
 use axum::Router;

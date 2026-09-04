@@ -14,29 +14,29 @@ function renderScreen() {
 }
 
 describe("Open assists", () => {
-  it("renders every seeded assist with responder names, never counts", async () => {
+  it("renders every assist with responder names, never counts", async () => {
     mockHubFetch();
     renderScreen();
     await waitFor(() => {
       expect(
-        screen.getByText("Need help with an image pull that keeps failing on staging"),
+        screen.getByText("Rollout hangs on an image pull"),
       ).toBeTruthy();
     });
-    expect(screen.getAllByText(/S-2\d{3}/).length).toBe(4);
+    expect(screen.getAllByText(/^S-\d+$/).length).toBe(4);
     // Names, not a count.
-    expect(screen.getByText("Priya, Arun")).toBeTruthy();
+    expect(screen.getByText("Responder, Bystander")).toBeTruthy();
     expect(screen.queryByText(/2 responders/)).toBeNull();
   });
 
   it("filters by status through hub query params", async () => {
     const fetchMock = mockHubFetch();
     renderScreen();
-    await waitFor(() => expect(screen.getAllByText(/S-2\d{3}/).length).toBe(4));
+    await waitFor(() => expect(screen.getAllByText(/^S-\d+$/).length).toBe(4));
 
     await userEvent.click(screen.getByRole("button", { name: /dormant/ }));
     await waitFor(() => {
-      expect(screen.getAllByText(/S-2\d{3}/).length).toBe(1);
-      expect(screen.getByText(/Vite build OOMs/)).toBeTruthy();
+      expect(screen.getAllByText(/^S-\d+$/).length).toBe(1);
+      expect(screen.getByText(/Vite build runs out of memory/)).toBeTruthy();
     });
     const urls = fetchMock.mock.calls.map((c) => String(c[0]));
     expect(urls.some((u) => u.includes("status=dormant"))).toBe(true);
@@ -45,12 +45,12 @@ describe("Open assists", () => {
   it("scopes to my assists with the toggle", async () => {
     mockHubFetch();
     renderScreen();
-    await waitFor(() => expect(screen.getAllByText(/S-2\d{3}/).length).toBe(4));
+    await waitFor(() => expect(screen.getAllByText(/^S-\d+$/).length).toBe(4));
 
     await userEvent.click(screen.getByRole("button", { name: /My assists/ }));
     await waitFor(() => {
-      expect(screen.getAllByText(/S-2\d{3}/).length).toBe(2);
-      expect(screen.queryByText(/image pull/)).toBeNull();
+      expect(screen.getAllByText(/^S-\d+$/).length).toBe(2);
+      expect(screen.queryByText(/Rollout hangs/)).toBeNull();
     });
   });
 });

@@ -44,13 +44,16 @@ pub fn enum_str<T: serde::Serialize>(v: &T) -> String {
     }
 }
 
-/// Resolve the current user from `X-User-Id`, defaulting to `u-alex` (seeded)
-/// so plain curl works. Seeded users only - real auth arrives with P2.
+/// Resolve the current user from `X-User-Id`. The app sets the header once
+/// the machine has an identity (see the Setup screen); a request without one
+/// has no identity to act as. Real auth arrives with P2.
 pub async fn current_user(pool: &SqlitePool, headers: &HeaderMap) -> Result<User, AppError> {
     let id = headers
         .get("x-user-id")
         .and_then(|v| v.to_str().ok())
-        .unwrap_or("u-alex")
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| AppError::Forbidden("the X-User-Id header is required".into()))?
         .to_string();
     let row = sqlx::query("SELECT id, name, initials FROM users WHERE id = ?")
         .bind(&id)
@@ -66,7 +69,7 @@ pub async fn current_user(pool: &SqlitePool, headers: &HeaderMap) -> Result<User
 
 pub async fn next_ref(pool: &SqlitePool) -> Result<String, AppError> {
     let n: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(MAX(CAST(SUBSTR(ref, 3) AS INTEGER)), 2400) + 1 FROM assists",
+        "SELECT COALESCE(MAX(CAST(SUBSTR(ref, 3) AS INTEGER)), 0) + 1 FROM assists",
     )
     .fetch_one(pool)
     .await?;

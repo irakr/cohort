@@ -8,13 +8,13 @@
 -- No aggregate of help received anywhere, by design (project plan section 8).
 
 CREATE TABLE IF NOT EXISTS users (
-  id       TEXT PRIMARY KEY,          -- 'u-alex'
+  id       TEXT PRIMARY KEY,          -- 'u-ira-k', slugged from the name
   name     TEXT NOT NULL,
   initials TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS assists (
-  ref         TEXT PRIMARY KEY,       -- 'S-2411'
+  ref         TEXT PRIMARY KEY,       -- 'S-1', numbered from 1 per hub
   title       TEXT NOT NULL,
   status      TEXT NOT NULL DEFAULT 'open'
               CHECK (status IN ('open','dormant','done')),

@@ -1,12 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Clock, User as UserIcon, Users } from "lucide-react";
 import { useApi } from "../../api/hooks";
 import type { AssistStatus, AssistSummary } from "../../api/types";
 import { Spinner, STATUS_META, StatusDot } from "../../components/ui";
 import { timeAgo } from "../../util";
 import { useNav } from "../../app/router";
-
-const TAG_FILTERS = ["All", "kubernetes", "postgres", "ci", "networking"];
 
 export function OpenAssists() {
   const { navigate } = useNav();
@@ -32,6 +30,24 @@ export function OpenAssists() {
   const { data: assists, loading, error } = useApi<AssistSummary[]>(path, { pollMs: 15000 });
   // Unfiltered list for the status chip counts.
   const { data: allAssists } = useApi<AssistSummary[]>("/api/assists", { pollMs: 15000 });
+
+  // Tag chips are whatever the assists actually carry. A fresh hub has none,
+  // and a tag disappears from the row once the last assist using it is gone.
+  const tagFilters = useMemo(() => {
+    const tags = new Set<string>();
+    for (const a of allAssists ?? []) {
+      for (const t of a.tags) {
+        tags.add(t);
+      }
+    }
+    return [...tags].sort();
+  }, [allAssists]);
+
+  useEffect(() => {
+    if (tagFilter !== "All" && !tagFilters.includes(tagFilter)) {
+      setTagFilter("All");
+    }
+  }, [tagFilter, tagFilters]);
 
   return (
     <div style={{ maxWidth: 900, margin: "0 auto", padding: "34px 28px" }}>
@@ -77,16 +93,20 @@ export function OpenAssists() {
           <UserIcon size={13} />
           My assists
         </button>
-        <div style={{ width: 1, height: 22, background: "var(--color-neutral-300)" }} />
-        {TAG_FILTERS.map((t) => (
-          <button
-            key={t}
-            className={`btn${tagFilter === t ? " btn-on" : ""}`}
-            onClick={() => setTagFilter(t)}
-          >
-            {t}
-          </button>
-        ))}
+        {tagFilters.length > 0 && (
+          <>
+            <div style={{ width: 1, height: 22, background: "var(--color-neutral-300)" }} />
+            {["All", ...tagFilters].map((t) => (
+              <button
+                key={t}
+                className={`btn${tagFilter === t ? " btn-on" : ""}`}
+                onClick={() => setTagFilter(t)}
+              >
+                {t}
+              </button>
+            ))}
+          </>
+        )}
       </div>
 
       {loading && (
@@ -96,7 +116,8 @@ export function OpenAssists() {
       )}
       {error && (
         <div className="card" style={{ padding: 18, color: "var(--color-accent-700)" }}>
-          Could not reach the hub: {error}. Check the hub URL in the rail settings.
+          Could not load assists: {error}. If the hub is the wrong one, change its
+          URL in the rail settings.
         </div>
       )}
 

@@ -382,7 +382,7 @@ pub struct BriefDraft {
     pub environment: Vec<String>,
 }
 
-// ---- Live data (seeded per assist; later streamed by the owner agent) ----
+// ---- Live data (uploaded by the owner agent on share; later streamed) ----
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[cfg_attr(feature = "ts-export", ts(export))]

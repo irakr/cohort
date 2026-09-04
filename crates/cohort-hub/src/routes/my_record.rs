@@ -105,58 +105,8 @@ pub async fn my_record(
         records_count,
         my_assists,
         credits_rows,
-        ai_usage: ai_usage_fixture(),
+        // Empty until the detector daemon (P1) measures real usage. Nothing
+        // here is ever invented: the UI shows the panel as not yet available.
+        ai_usage: Vec::new(),
     }))
-}
-
-/// Static fixture until the detector daemon (P1) supplies real numbers.
-fn ai_usage_fixture() -> Vec<AiUsageRange> {
-    let agents = |scale: f64| {
-        vec![
-            AiAgentUsage {
-                name: "Claude Code".into(),
-                model: "Opus 4.5".into(),
-                share_pct: 73,
-                tokens: format!("{:.1}M", 6.1 * scale),
-                spend: format!("Rs {:.0}", 4555.0 * scale),
-            },
-            AiAgentUsage {
-                name: "Cursor".into(),
-                model: "GPT-5.2".into(),
-                share_pct: 21,
-                tokens: format!("{:.1}M", 1.8 * scale),
-                spend: format!("Rs {:.0}", 1310.0 * scale),
-            },
-            AiAgentUsage {
-                name: "Aider".into(),
-                model: "Qwen3-Max".into(),
-                share_pct: 6,
-                tokens: format!("{:.1}M", 0.5 * scale),
-                spend: format!("Rs {:.0}", 375.0 * scale),
-            },
-        ]
-    };
-    vec![
-        AiUsageRange {
-            range: "7d".into(),
-            tokens: "2.1M".into(),
-            spend: "Rs 1,560".into(),
-            longest_stall: "17 turns".into(),
-            agents: agents(0.25),
-        },
-        AiUsageRange {
-            range: "30d".into(),
-            tokens: "8.4M".into(),
-            spend: "Rs 6,240".into(),
-            longest_stall: "38 turns".into(),
-            agents: agents(1.0),
-        },
-        AiUsageRange {
-            range: "90d".into(),
-            tokens: "23.9M".into(),
-            spend: "Rs 17,800".into(),
-            longest_stall: "38 turns".into(),
-            agents: agents(2.85),
-        },
-    ]
 }

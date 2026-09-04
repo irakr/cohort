@@ -30,10 +30,10 @@ describe("First-launch identity", () => {
     const fetchMock = mockHubFetch();
     render(<App />);
 
-    await waitFor(() => expect(screen.getByRole("button", { name: /Meera N\./ })).toBeTruthy());
-    await userEvent.click(screen.getByRole("button", { name: /Meera N\./ }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /Responder/ })).toBeTruthy());
+    await userEvent.click(screen.getByRole("button", { name: /Responder/ }));
 
-    await waitFor(() => expect(localStorage.getItem("cohort.userId")).toBe("u-meera"));
+    await waitFor(() => expect(localStorage.getItem("cohort.userId")).toBe("u-responder"));
     await waitFor(() => expect(screen.getByText("Assists")).toBeTruthy());
     expect(
       fetchMock.mock.calls.some(

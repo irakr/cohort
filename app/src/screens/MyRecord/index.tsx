@@ -29,6 +29,8 @@ export function MyRecord() {
     );
   }
 
+  // Empty until the detector daemon (P1) measures real usage; the panel says
+  // so rather than showing numbers nobody measured.
   const usage = record.ai_usage.find((u) => u.range === range) ?? record.ai_usage[0];
 
   const stats = [
@@ -194,51 +196,60 @@ export function MyRecord() {
           ))}
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 14 }}>
-          {[
-            { label: "Tokens", value: usage.tokens },
-            { label: "Spend", value: usage.spend },
-            { label: "Longest stall", value: usage.longest_stall },
-          ].map(({ label, value }) => (
-            <div key={label} className="card" style={{ padding: 14 }}>
-              <div style={{ fontSize: 20, fontWeight: 700 }}>{value}</div>
-              <div style={{ fontSize: 12, color: "var(--color-neutral-600)" }}>{label}</div>
-            </div>
-          ))}
-        </div>
+        {!usage ? (
+          <div className="card" style={{ padding: 16, fontSize: 13, color: "var(--color-neutral-600)" }}>
+            Nothing measured yet. Token spend and stall length arrive with the
+            detector; until then there is nothing to show here.
+          </div>
+        ) : (
+          <>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 14 }}>
+            {[
+              { label: "Tokens", value: usage.tokens },
+              { label: "Spend", value: usage.spend },
+              { label: "Longest stall", value: usage.longest_stall },
+            ].map(({ label, value }) => (
+              <div key={label} className="card" style={{ padding: 14 }}>
+                <div style={{ fontSize: 20, fontWeight: 700 }}>{value}</div>
+                <div style={{ fontSize: 12, color: "var(--color-neutral-600)" }}>{label}</div>
+              </div>
+            ))}
+          </div>
 
-        <div className="card" style={{ padding: "6px 14px" }}>
-          {usage.agents.map((agent) => (
-            <div
-              key={agent.name}
-              style={{
-                display: "grid",
-                gridTemplateColumns: "130px 100px minmax(80px, 1fr) 64px 74px",
-                alignItems: "center",
-                gap: 10,
-                borderBottom: "1px solid var(--color-neutral-200)",
-                padding: "9px 0",
-                fontSize: 12.5,
-              }}
-            >
-              <span style={{ fontWeight: 600 }}>{agent.name}</span>
-              <span style={{ color: "var(--color-neutral-600)" }}>{agent.model}</span>
-              <span style={{ background: "var(--color-neutral-200)", borderRadius: 4, height: 8 }}>
-                <span
-                  style={{
-                    display: "block",
-                    width: `${agent.share_pct}%`,
-                    height: "100%",
-                    borderRadius: 4,
-                    background: "var(--color-accent)",
-                  }}
-                />
-              </span>
-              <span className="mono" style={{ fontSize: 11.5 }}>{agent.tokens}</span>
-              <span className="mono" style={{ fontSize: 11.5 }}>{agent.spend}</span>
-            </div>
-          ))}
-        </div>
+          <div className="card" style={{ padding: "6px 14px" }}>
+            {usage.agents.map((agent) => (
+              <div
+                key={agent.name}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "130px 100px minmax(80px, 1fr) 64px 74px",
+                  alignItems: "center",
+                  gap: 10,
+                  borderBottom: "1px solid var(--color-neutral-200)",
+                  padding: "9px 0",
+                  fontSize: 12.5,
+                }}
+              >
+                <span style={{ fontWeight: 600 }}>{agent.name}</span>
+                <span style={{ color: "var(--color-neutral-600)" }}>{agent.model}</span>
+                <span style={{ background: "var(--color-neutral-200)", borderRadius: 4, height: 8 }}>
+                  <span
+                    style={{
+                      display: "block",
+                      width: `${agent.share_pct}%`,
+                      height: "100%",
+                      borderRadius: 4,
+                      background: "var(--color-accent)",
+                    }}
+                  />
+                </span>
+                <span className="mono" style={{ fontSize: 11.5 }}>{agent.tokens}</span>
+                <span className="mono" style={{ fontSize: 11.5 }}>{agent.spend}</span>
+              </div>
+            ))}
+          </div>
+          </>
+        )}
       </section>
     </div>
   );
