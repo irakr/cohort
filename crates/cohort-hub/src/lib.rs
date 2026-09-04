@@ -2,7 +2,6 @@ pub mod config;
 pub mod db;
 pub mod domain;
 pub mod error;
-pub mod llm;
 pub mod logging;
 pub mod routes;
 
@@ -28,7 +27,6 @@ pub type FrameStore = Arc<Mutex<HashMap<(String, i64), Frame>>>;
 pub struct AppState {
     pub pool: SqlitePool,
     pub config: Arc<Config>,
-    pub http: reqwest::Client,
     /// In-memory frame relay for window mirroring (see routes::frames).
     pub frames: FrameStore,
 }
@@ -53,7 +51,6 @@ pub fn build_router(pool: SqlitePool, config: Config) -> Router {
     let state = AppState {
         pool,
         config: Arc::new(config),
-        http: reqwest::Client::new(),
         frames: Arc::new(Mutex::new(HashMap::new())),
     };
     routes::api_router()

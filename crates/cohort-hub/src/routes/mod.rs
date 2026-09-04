@@ -1,5 +1,4 @@
 pub mod assists;
-pub mod draft_brief;
 pub mod frames;
 pub mod my_record;
 pub mod notifications;
@@ -21,7 +20,6 @@ pub fn api_router() -> Router<AppState> {
         .route("/api/users", get(users::list).post(users::create))
         .route("/api/notifications", get(notifications::list))
         .route("/api/assists", get(assists::list).post(assists::create))
-        .route("/api/assists/draft-brief", post(draft_brief::draft))
         .route("/api/assists/{ref}", get(assists::detail).delete(assists::destroy))
         .route("/api/assists/{ref}/responders", post(assists::join))
         .route(

@@ -35,11 +35,11 @@ dev-app:
 # The ts-export feature gates ts-rs's generated export tests, so a plain
 # `cargo test` never writes TypeScript files.
 types:
-	TS_RS_EXPORT_DIR=../../app/src/api/types cargo test --locked -p cohort-hub -p cohort-agent --features cohort-hub/ts-export,cohort-agent/ts-export export_bindings
+	TS_RS_EXPORT_DIR=../../app/src/api/types cargo test --locked -p cohort-hub -p cohort-agent -p cohort-llm --features cohort-hub/ts-export,cohort-agent/ts-export,cohort-llm/ts-export export_bindings
 	cd app/src/api/types && rm -f index.ts && (for f in *.ts; do echo "export type * from \"./$${f%.ts}\";"; done) > index.tmp && mv index.tmp index.ts
 
 test-hub:
-	cargo test --locked -p cohort-hub -p cohort-agent -p cohort-dirs
+	cargo test --locked -p cohort-hub -p cohort-agent -p cohort-llm -p cohort-dirs
 
 test-app:
 	@$(NODE_ENV); cd app && npm test

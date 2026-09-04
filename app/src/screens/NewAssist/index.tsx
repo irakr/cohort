@@ -1,13 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Bot, Check, FileText, Folder, Plus, X } from "lucide-react";
-import { envFingerprint, snapshotPaths, suggestArtifacts } from "../../api/agent";
+import {
+  assistantConfigGet,
+  draftInsights,
+  envFingerprint,
+  snapshotPaths,
+  suggestArtifacts,
+} from "../../api/agent";
 import { apiPost } from "../../api/client";
 import type {
   ArtifactCandidate,
   ArtifactGroup,
   AssistArtifact,
   AssistDetail,
-  BriefDraft,
   Category,
 } from "../../api/types";
 import { IconTile, Spinner } from "../../components/ui";
@@ -114,6 +119,19 @@ export function NewAssist() {
   const [addOpen, setAddOpen] = useState(false);
   const [phase, setPhase] = useState<"select" | "analyzing">("select");
   const [analyzeStep, setAnalyzeStep] = useState("");
+  // The model configured on this machine, if any: insights are drafted here.
+  const [assistantModel, setAssistantModel] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void assistantConfigGet().then((cfg) => {
+      if (!cancelled) {
+        setAssistantModel(cfg?.model ?? null);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [createError, setCreateError] = useState<string | null>(null);
 
   // Scan on mount and again whenever the Add artifacts dialog opens, so the
@@ -160,12 +178,20 @@ export function NewAssist() {
       pid: it.pid,
     }));
     try {
-      setAnalyzeStep("Drafting insights from the selected artifacts...");
-      const draft = await apiPost<BriefDraft>("/api/assists/draft-brief", {
+      setAnalyzeStep(
+        assistantModel
+          ? `Drafting insights with ${assistantModel} on this machine...`
+          : "No assistant configured on this machine; creating without insights...",
+      );
+      const outcome = await draftInsights({
         title: title.trim(),
         description: description.trim(),
-        artifacts,
+        artifacts: artifacts.map((a) => ({ kind: a.kind, label: a.label, detail: a.detail })),
       });
+      if (outcome.note) {
+        console.warn(`insights: ${outcome.note}`);
+      }
+      const draft = outcome.draft;
       const environment = [
         ...draft.environment,
         ...fingerprint.filter((f) => !draft.environment.includes(f)),
@@ -463,6 +489,11 @@ export function NewAssist() {
         {createError && (
           <div style={{ fontSize: 12.5, color: "var(--color-accent-700)" }}>{createError}</div>
         )}
+        <div style={{ fontSize: 12, color: "var(--color-neutral-600)", marginBottom: 8 }}>
+          {assistantModel
+            ? `Insights: drafted by ${assistantModel} on this machine from your description and the shared files.`
+            : "Insights: no assistant configured on this machine (gear menu, Assistant). The assist is created without them."}
+        </div>
         <button className="btn btn-primary btn-block" disabled={!canCreate} onClick={() => void create()}>
           Create assist
         </button>

@@ -18,8 +18,6 @@ fn test_config() -> Config {
         db: "sqlite::memory:".into(),
         allowed_origins: vec!["http://localhost:1420".into()],
         log_dir: None,
-        anthropic_api_key: None,
-        anthropic_model: "claude-sonnet-5".into(),
     }
 }
 
@@ -796,29 +794,6 @@ async fn live_data_requires_membership() {
     let (status, v) = call(&app, "GET", &format!("/api/assists/{ref_}/artifacts"), Some(&outsider), None).await;
     assert_eq!(status, StatusCode::OK);
     assert!(v["files"].as_object().unwrap().contains_key("k8s/deployment.yaml"));
-}
-
-// ---- Insights drafting fallback ----
-
-#[tokio::test]
-async fn draft_brief_without_api_key_invents_nothing() {
-    let app = app().await;
-    let owner = user(&app, "Owner").await;
-    let body = json!({
-        "title": "Rollout stuck on image pull",
-        "description": "The pod never becomes ready.",
-        "artifacts": [
-            { "id": "a1", "kind": "ai_agent", "label": "Claude Code", "detail": "running - /work/payments" },
-            { "id": "f1", "kind": "file", "label": "deployment.yaml", "detail": "k8s/payments - ref a3f9c1" }
-        ]
-    });
-    let (status, v) = call(&app, "POST", "/api/assists/draft-brief", Some(&owner), Some(body)).await;
-    assert_eq!(status, StatusCode::OK);
-    // No AI -> empty draft, never fabricated content. The UI shows N/A.
-    assert_eq!(v["insights"], "");
-    assert_eq!(v["environment"].as_array().unwrap().len(), 0);
-    assert!(v.get("failures").is_none());
-    assert!(v.get("goal").is_none());
 }
 
 // ---- User registration (per-machine identity) ----

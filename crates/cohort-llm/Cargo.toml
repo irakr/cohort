@@ -1,17 +1,17 @@
 [package]
-name = "cohort-agent"
+name = "cohort-llm"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "Provider-neutral LLM transport: OpenAI-compatible and Anthropic Messages"
 
 [dependencies]
-base64 = "0.23"
 log = "0.4"
+reqwest = { version = "0.13", features = ["json", "rustls", "http2"], default-features = false }
 serde = { workspace = true }
 serde_json = { workspace = true }
+thiserror = { workspace = true }
 ts-rs = { workspace = true }
-cohort-dirs = { path = "../cohort-dirs" }
-cohort-llm = { path = "../cohort-llm" }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }
@@ -20,6 +20,3 @@ tokio = { version = "1", features = ["macros", "rt"] }
 # Enables the ts-rs export tests used by `make types`. Off by default so a
 # plain `cargo test` never writes TypeScript files.
 ts-export = []
-
-[target.'cfg(target_os = "macos")'.dependencies]
-core-foundation = "0.10"

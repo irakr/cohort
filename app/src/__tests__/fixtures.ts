@@ -108,6 +108,31 @@ export function mockHubFetch() {
       payload = users;
     } else if (url.pathname === "/api/notifications") {
       payload = { now: new Date().toISOString(), notifications: [] };
+    } else if (url.pathname === "/api/assists" && init?.method === "POST") {
+      const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+      payload = {
+        ref: "S-9",
+        title: body.title,
+        status: "open",
+        category: body.category ?? null,
+        tags: body.tags ?? [],
+        owner_id: "u-owner",
+        owner_name: "Owner",
+        anonymous: false,
+        description: body.description ?? "",
+        insights: body.insights ?? "",
+        environment: body.environment ?? [],
+        artifacts: body.artifacts ?? [],
+        responders: [],
+        scope_requests: [],
+        grants: [],
+        catalog: [],
+        catalog_at: null,
+        viewer_is_owner: true,
+        viewer_is_responder: false,
+        created_at: new Date().toISOString(),
+        closed_at: null,
+      };
     } else if (url.pathname === "/api/assists") {
       let rows = ASSISTS;
       const status = url.searchParams.get("status");

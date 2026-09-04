@@ -359,29 +359,6 @@ pub struct NotificationsResponse {
     pub notifications: Vec<HubNotification>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[cfg_attr(feature = "ts-export", ts(export))]
-pub struct DraftBriefRequest {
-    #[serde(default)]
-    pub title: String,
-    /// Owner-written problem statement, source material for the analysis.
-    #[serde(default)]
-    pub description: String,
-    #[serde(default)]
-    pub artifacts: Vec<AssistArtifact>,
-}
-
-/// Draft produced by the Cohort AI integration. Without an API key both
-/// fields stay empty - nothing is invented; the UI shows Insights as N/A.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[cfg_attr(feature = "ts-export", ts(export))]
-pub struct BriefDraft {
-    /// Short markdown bullets on what the owner intends and what the
-    /// artifacts show.
-    pub insights: String,
-    pub environment: Vec<String>,
-}
-
 // ---- Live data (uploaded by the owner agent on share; later streamed) ----
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

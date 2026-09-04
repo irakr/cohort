@@ -8,6 +8,14 @@ import { mockHubFetch } from "./fixtures";
 // Simulate what the agent module's live scan reports on a machine with one
 // working directory and one running AI agent session.
 vi.mock("../api/agent", () => ({
+  assistantConfigGet: vi.fn(async () => null),
+  draftInsights: vi.fn(async () => ({
+    draft: { insights: "", environment: [] },
+    note: "no assistant in this test",
+    model: null,
+    input_tokens: 0,
+    output_tokens: 0,
+  })),
   suggestArtifacts: vi.fn(async () => [
     {
       title: "Files",

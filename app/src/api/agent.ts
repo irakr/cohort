@@ -3,7 +3,7 @@
 // browser dev) there is no agent module, so there are no suggestions.
 
 import { inTauri } from "./tauri";
-import type { ArtifactGroup, PathSnapshot } from "./types";
+import type { ArtifactGroup, DraftOutcome, InsightsInput, LlmConfig, PathSnapshot, Preset } from "./types";
 
 export async function suggestArtifacts(): Promise<ArtifactGroup[]> {
   if (!inTauri()) {
@@ -111,4 +111,61 @@ export async function envFingerprint(): Promise<string[]> {
   } catch {
     return [];
   }
+}
+
+// ---- Assistant: the model runs from this machine, with this machine's
+// settings. Nothing here reaches the hub.
+
+export async function assistantPresets(): Promise<Preset[]> {
+  return (await invokeOrNull<Preset[]>("assistant_presets")) ?? [];
+}
+
+/** This machine's assistant settings; null when none are saved. */
+export async function assistantConfigGet(): Promise<LlmConfig | null> {
+  return await invokeOrNull<LlmConfig | null>("assistant_config_get");
+}
+
+/** Save (or, with null, forget) this machine's assistant settings.
+    Resolves to null on success, or a message saying why it failed. */
+export async function assistantConfigSet(config: LlmConfig | null): Promise<string | null> {
+  if (!inTauri()) {
+    return "not running inside the Cohort app";
+  }
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("assistant_config_set", { config });
+    return null;
+  } catch (e) {
+    console.error("assistant_config_set failed:", e);
+    return e instanceof Error ? e.message : String(e);
+  }
+}
+
+/** One tiny round trip with settings that may not be saved yet. */
+export async function assistantConfigTest(config: LlmConfig): Promise<{ ok: boolean; message: string }> {
+  if (!inTauri()) {
+    return { ok: false, message: "not running inside the Cohort app" };
+  }
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const message = await invoke<string>("assistant_config_test", { config });
+    return { ok: true, message };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** Draft the insights for a new assist on this machine. Outside Tauri there
+    is no assistant: the draft is empty and the note says so. */
+export async function draftInsights(input: InsightsInput): Promise<DraftOutcome> {
+  const outcome = await invokeOrNull<DraftOutcome>("draft_insights", { input });
+  return (
+    outcome ?? {
+      draft: { insights: "", environment: [] },
+      note: "No assistant outside the Cohort app; insights left empty.",
+      model: null,
+      input_tokens: 0,
+      output_tokens: 0,
+    }
+  );
 }

@@ -12,9 +12,14 @@ resolution record. See `../project-plan.md` for the product plan.
   and env fingerprints are produced locally and stay on the owner's machine
   until explicitly shared.
 - `crates/cohort-hub/` - the hub server (Rust, axum, SQLite). Deployable to a
-  commonly accessible server such as a company data centre. Optional LLM brief
-  drafting via the Claude API, with a deterministic fallback.
-- `crates/cohort-agent/` - the owner agent module library. Scans the machine
+  commonly accessible server such as a company data centre. Makes no outbound
+  requests and calls no model.
+- `crates/cohort-llm/` - provider-neutral model transport: two wire protocols
+  (OpenAI-compatible chat completions, Anthropic Messages) and a preset table.
+  Knows nothing about assists.
+- `crates/cohort-agent/` - the owner agent module library. Hosts the
+  assistant (`assistant/`): context assembly from shared paths, prompt
+  building, and the call to this machine's configured model. Scans the machine
   for real when the picker opens: interactive terminal sessions (process
   table + tty, working directory via lsof on macOS / procfs on Linux),
   running or installed AI agents (Claude Code session activity is read from
@@ -66,8 +71,14 @@ Hub configuration (env):
 - `COHORT_DB` (default `cohort.db`)
 - `COHORT_ALLOWED_ORIGINS` (CSV; defaults cover the Vite dev server and the
   Tauri webview origins)
-- `ANTHROPIC_API_KEY` (optional; absent means deterministic brief drafts)
-- `ANTHROPIC_MODEL` (default `claude-sonnet-5`)
+
+The hub calls no model. The assistant (insights drafting when an assist is
+opened) runs inside each machine's app with the provider that machine is
+configured for - gear menu, Assistant section: a preset (Anthropic, OpenAI,
+Deepseek, Gemini, Ollama) or any OpenAI-compatible URL such as a LAN model
+server or a company gateway. Settings live in `config/assistant.json`
+(owner-readable only). Not configured means insights stay empty and the app
+says so.
 
 Data-centre deploy: `crates/cohort-hub/Dockerfile`.
 
@@ -82,6 +93,12 @@ Windows `%APPDATA%\cohort`), split into subdirectories:
 
 Both files start empty on every launch, so a log always covers exactly one
 run. Copy one aside before restarting if you still need it.
+
+In development builds (`make dev-app`) Cohort's own crates log at debug, so
+app.log carries every assistant exchange in full: the configuration in use
+(never the key), the request body with the prompt, the raw reply, token
+counts and timing. `COHORT_LOG=info make dev-app` quiets that; release builds
+default to info and accept the same override.
 - `config/cohort.db` - the hub's SQLite database when `COHORT_DB` is unset
 
 ## Reproducible builds

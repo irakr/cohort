@@ -2,7 +2,8 @@ use std::path::PathBuf;
 
 /// Hub configuration, read from the environment. The hub is deployed to a
 /// commonly accessible server (e.g. a company data centre), so bind address
-/// and allowed origins are configurable.
+/// and allowed origins are configurable. The hub calls no model: assistant
+/// settings live on each machine's app.
 #[derive(Debug, Clone)]
 pub struct Config {
     /// `COHORT_BIND`, default `127.0.0.1:7400`. Use `0.0.0.0:7400` when serving a LAN.
@@ -17,10 +18,6 @@ pub struct Config {
     /// `COHORT_LOG_DIR` override for the log directory. Default:
     /// `<OS config dir>/cohort/logs`. None here means "use the default".
     pub log_dir: Option<PathBuf>,
-    /// `ANTHROPIC_API_KEY`. Absent -> the insights draft stays empty.
-    pub anthropic_api_key: Option<String>,
-    /// `ANTHROPIC_MODEL`, default `claude-sonnet-5`.
-    pub anthropic_model: String,
 }
 
 impl Config {
@@ -42,9 +39,6 @@ impl Config {
                 .filter(|s| !s.is_empty())
                 .collect(),
             log_dir: std::env::var_os("COHORT_LOG_DIR").map(PathBuf::from),
-            anthropic_api_key: std::env::var("ANTHROPIC_API_KEY").ok().filter(|k| !k.is_empty()),
-            anthropic_model: std::env::var("ANTHROPIC_MODEL")
-                .unwrap_or_else(|_| "claude-sonnet-5".into()),
         }
     }
 }

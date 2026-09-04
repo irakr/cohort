@@ -10,11 +10,16 @@
 //! working directories the machine's shells and agents point at. The
 //! detector daemon (P1) deepens this with telemetry; the picker's manual
 //! "Add artifacts" covers anything the scan cannot see.
+//!
+//! The [`assistant`] is the model-facing part: it assembles context from
+//! this machine and calls the model the user configured, here, never on
+//! the hub.
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use ts_rs::TS;
 
+pub mod assistant;
 pub mod icons;
 pub mod scan;
 pub mod snapshot;
