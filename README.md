@@ -76,9 +76,12 @@ Both binaries share one on-disk namespace in the OS config directory
 Windows `%APPDATA%\cohort`), split into subdirectories:
 
 - `logs/app.log` - the desktop app (Rust side plus the forwarded webview
-  console), rotated at 2 MB
+  console), rotated at 2 MB within a run
 - `logs/hub.log` - the hub (also mirrored to stdout); override the
   directory with `COHORT_LOG_DIR` on servers
+
+Both files start empty on every launch, so a log always covers exactly one
+run. Copy one aside before restarting if you still need it.
 - `config/cohort.db` - the hub's SQLite database when `COHORT_DB` is unset
 
 ## Reproducible builds

@@ -3,7 +3,7 @@
 //! hub only when the owner explicitly shares it.
 
 use cohort_agent::{AgentModule, ArtifactGroup, LocalAgent};
-use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
+use tauri_plugin_log::{FileOpenStrategy, RotationStrategy, Target, TargetKind};
 
 #[tauri::command]
 fn suggest_artifacts() -> Vec<ArtifactGroup> {
@@ -98,6 +98,11 @@ pub fn run() {
                         }),
                     ])
                     .max_file_size(2 * 1024 * 1024)
+                    // Each run starts a fresh app.log: Rotate discards the
+                    // previous session's file on open (KeepOne deletes rather
+                    // than archives), so logs never span runs. Within a run
+                    // the size cap still rotates.
+                    .file_open_strategy(FileOpenStrategy::Rotate)
                     .rotation_strategy(RotationStrategy::KeepOne)
                     .build(),
             )?;
