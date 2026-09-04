@@ -8,7 +8,7 @@ license.workspace = true
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
 tower-http = { version = "0.7", features = ["cors", "trace"] }
-sqlx = { version = "0.9", features = ["runtime-tokio", "sqlite", "chrono", "migrate"] }
+sqlx = { version = "0.9", features = ["runtime-tokio", "sqlite", "chrono"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }

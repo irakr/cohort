@@ -6,6 +6,10 @@ use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{Row, SqlitePool};
 use std::str::FromStr;
 
+/// The whole schema, applied on every start. There is no migration history:
+/// when the design changes, `schema.sql` changes and the database is reset.
+const SCHEMA: &str = include_str!("../schema.sql");
+
 pub async fn pool(db: &str) -> Result<SqlitePool, sqlx::Error> {
     let opts = SqliteConnectOptions::from_str(db)?
         .create_if_missing(true)
@@ -16,9 +20,7 @@ pub async fn pool(db: &str) -> Result<SqlitePool, sqlx::Error> {
         .max_connections(1)
         .connect_with(opts)
         .await?;
-    sqlx::migrate!("./migrations").run(&pool).await.map_err(|e| {
-        sqlx::Error::Protocol(format!("migration failed: {e}"))
-    })?;
+    sqlx::raw_sql(SCHEMA).execute(&pool).await?;
     Ok(pool)
 }
 
